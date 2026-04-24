@@ -1,0 +1,286 @@
+import Foundation
+import CoreGraphics
+import AppKit
+import Observation
+
+enum LayerKind: String, Codable, Sendable { case raster, text, gradient, solid }
+
+struct Adjustments: Codable, Sendable, Equatable {
+    var brightness: Double = 0   // -1...1
+    var contrast: Double = 0     // -1...1
+    var exposure: Double = 0     // -2...2 EV
+    var saturation: Double = 0   // -1...1
+    var warmth: Double = 0       // -1...1
+    var shadows: Double = 0      // -1...1
+    var highlights: Double = 0   // -1...1
+}
+
+struct Filters: Codable, Sendable, Equatable {
+    var blur: Double = 0         // 0...50
+    var noise: Double = 0        // 0...1
+    var noiseMono: Bool = true
+    var sharpen: Double = 0      // 0...2
+    var pixelate: Double = 0     // 0...40
+    var hueShift: Double = 0     // -180...180
+}
+
+struct Relight: Codable, Sendable, Equatable {
+    var enabled: Bool = false
+    var position: CGPoint = .init(x: 0.35, y: 0.35)
+    var intensity: Double = 0.8
+    var radius: Double = 0.55
+    var color: ColorRGB = ColorRGB(r: 1.0, g: 0.91, b: 0.69)
+    var ambient: Double = -0.2
+}
+
+struct SkinRetouch: Codable, Sendable, Equatable {
+    var enabled: Bool = false
+    var smooth: Double = 0.45
+    var evenTone: Double = 0.30
+    var deage: Double = 0.20
+    var glow: Double = 0.15
+}
+
+struct LayerStyles: Codable, Sendable, Equatable {
+    var dropShadow = DropShadow()
+    var outerGlow = OuterGlow()
+    var stroke = Stroke()
+    var gradientFill = GradientFill()
+}
+struct DropShadow: Codable, Sendable, Equatable {
+    var enabled = false
+    var color: ColorRGB = .black
+    var opacity: Double = 0.7
+    var distance: Double = 8
+    var angle: Double = 135
+    var blur: Double = 16
+}
+struct OuterGlow: Codable, Sendable, Equatable {
+    var enabled = false
+    var color: ColorRGB = ColorRGB(r: 1, g: 0.85, b: 0.35)
+    var opacity: Double = 0.8
+    var size: Double = 30
+    var spread: Double = 2
+}
+struct Stroke: Codable, Sendable, Equatable {
+    var enabled = false
+    var color: ColorRGB = .black
+    var size: Double = 6
+    var opacity: Double = 1
+}
+struct GradientFill: Codable, Sendable, Equatable {
+    var enabled = false
+    var c1: ColorRGB = ColorRGB(r: 1, g: 0.89, b: 0.35)
+    var c2: ColorRGB = ColorRGB(r: 1, g: 0.65, b: 0.32)
+    var angle: Double = 90
+    var opacity: Double = 1
+}
+
+struct ColorRGB: Codable, Sendable, Equatable, Hashable {
+    var r: Double
+    var g: Double
+    var b: Double
+    var a: Double = 1
+    static let black = ColorRGB(r: 0, g: 0, b: 0)
+    static let white = ColorRGB(r: 1, g: 1, b: 1)
+    var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: a) }
+    var cgColor: CGColor { nsColor.cgColor }
+    init(r: Double, g: Double, b: Double, a: Double = 1) { self.r = r; self.g = g; self.b = b; self.a = a }
+    init(_ ns: NSColor) {
+        let c = ns.usingColorSpace(.sRGB) ?? ns
+        self.r = Double(c.redComponent); self.g = Double(c.greenComponent); self.b = Double(c.blueComponent); self.a = Double(c.alphaComponent)
+    }
+}
+
+enum BlendMode: String, Codable, CaseIterable, Sendable {
+    case normal, multiply, screen, overlay, softLight = "soft-light", hardLight = "hard-light"
+    case colorDodge = "color-dodge", colorBurn = "color-burn", lighten, darken
+    case difference, exclusion, hue, saturation, color, luminosity
+    var cgBlend: CGBlendMode {
+        switch self {
+        case .normal: return .normal
+        case .multiply: return .multiply
+        case .screen: return .screen
+        case .overlay: return .overlay
+        case .softLight: return .softLight
+        case .hardLight: return .hardLight
+        case .colorDodge: return .colorDodge
+        case .colorBurn: return .colorBurn
+        case .lighten: return .lighten
+        case .darken: return .darken
+        case .difference: return .difference
+        case .exclusion: return .exclusion
+        case .hue: return .hue
+        case .saturation: return .saturation
+        case .color: return .color
+        case .luminosity: return .luminosity
+        }
+    }
+}
+
+struct TextContent: Codable, Sendable, Equatable {
+    var string: String = "EPIC\nTITLE"
+    var fontName: String = "System"    // "System" | "System Rounded" | "System Mono" | "System Serif" | any installed font family
+    var fontSize: Double = 220
+    var weight: Double = 800           // 100…900
+    var italic: Bool = false
+    var underline: Bool = false
+    var strikethrough: Bool = false
+    var uppercase: Bool = false        // visual-only transform
+    var alignment: String = "center"   // left | center | right
+    var lineHeight: Double = 1.05
+    var tracking: Double = 0
+    var color: ColorRGB = .white
+    var anchorX: Double = 0.5
+    var anchorY: Double = 0.5
+
+    /// Optional rich-text data (RTF archive). When present, overrides the plain
+    /// `string` and provides per-range colors / bold / italic / underline.
+    var rtfData: Data?
+
+    // Cached text bounds from the last render (doc coords). Used by the move
+    // tool to hit-test + draw handles.
+    var lastRenderedBounds: CGRect = .zero
+
+    enum CodingKeys: String, CodingKey {
+        case string, fontName, fontSize, weight, italic, underline, strikethrough, uppercase
+        case alignment, lineHeight, tracking, color, anchorX, anchorY, rtfData, lastRenderedBounds
+    }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.string = try c.decodeIfPresent(String.self, forKey: .string) ?? "EPIC\nTITLE"
+        self.fontName = try c.decodeIfPresent(String.self, forKey: .fontName) ?? "System"
+        self.fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 220
+        self.weight = try c.decodeIfPresent(Double.self, forKey: .weight) ?? 800
+        self.italic = try c.decodeIfPresent(Bool.self, forKey: .italic) ?? false
+        self.underline = try c.decodeIfPresent(Bool.self, forKey: .underline) ?? false
+        self.strikethrough = try c.decodeIfPresent(Bool.self, forKey: .strikethrough) ?? false
+        self.uppercase = try c.decodeIfPresent(Bool.self, forKey: .uppercase) ?? false
+        self.alignment = try c.decodeIfPresent(String.self, forKey: .alignment) ?? "center"
+        self.lineHeight = try c.decodeIfPresent(Double.self, forKey: .lineHeight) ?? 1.05
+        self.tracking = try c.decodeIfPresent(Double.self, forKey: .tracking) ?? 0
+        self.color = try c.decodeIfPresent(ColorRGB.self, forKey: .color) ?? .white
+        self.anchorX = try c.decodeIfPresent(Double.self, forKey: .anchorX) ?? 0.5
+        self.anchorY = try c.decodeIfPresent(Double.self, forKey: .anchorY) ?? 0.5
+        self.rtfData = try c.decodeIfPresent(Data.self, forKey: .rtfData)
+        self.lastRenderedBounds = try c.decodeIfPresent(CGRect.self, forKey: .lastRenderedBounds) ?? .zero
+    }
+}
+
+struct GradientContent: Codable, Sendable, Equatable {
+    var kind: String = "linear"  // linear | radial
+    var c1: ColorRGB = ColorRGB(r: 1.0, g: 0.42, b: 0.53)
+    var s1: Double = 0
+    var c2: ColorRGB = ColorRGB(r: 1.0, g: 0.77, b: 0.44)
+    var s2: Double = 1
+    var angle: Double = 45
+    var center: CGPoint = .init(x: 0.5, y: 0.5)
+    var radius: Double = 0.7
+}
+
+struct SolidContent: Codable, Sendable, Equatable {
+    var color: ColorRGB = ColorRGB(r: 1.0, g: 0.45, b: 0.25)
+}
+
+/// A Photoshop-style Smart Object: keeps the original image (by URL + embedded
+/// bytes as fallback) and a non-destructive placement transform. Double-click
+/// opens the source in the OS default editor; file-system changes auto-reload.
+struct SmartSource: Codable, Sendable, Equatable {
+    var sourceURLBookmark: Data?
+    var sourcePath: String?
+    var sourceBytes: Data?
+    var sourceFormat: String = "png"
+    var pixelWidth: Int = 0
+    var pixelHeight: Int = 0
+    var centerX: Double = 0
+    var centerY: Double = 0
+    var scaleX: Double = 1
+    var scaleY: Double = 1
+    var rotationDeg: Double = 0
+    var flipH: Bool = false
+    var flipV: Bool = false
+    var edgeOffset: Double = 0
+    var edgeFeather: Double = 0
+    var edgeThreshold: Double = 0
+
+    enum CodingKeys: String, CodingKey {
+        case sourceURLBookmark, sourcePath, sourceBytes, sourceFormat
+        case pixelWidth, pixelHeight, centerX, centerY
+        case scaleX, scaleY, rotationDeg, flipH, flipV
+        case edgeOffset, edgeFeather, edgeThreshold
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.sourceURLBookmark = try c.decodeIfPresent(Data.self, forKey: .sourceURLBookmark)
+        self.sourcePath = try c.decodeIfPresent(String.self, forKey: .sourcePath)
+        self.sourceBytes = try c.decodeIfPresent(Data.self, forKey: .sourceBytes)
+        self.sourceFormat = try c.decodeIfPresent(String.self, forKey: .sourceFormat) ?? "png"
+        self.pixelWidth = try c.decodeIfPresent(Int.self, forKey: .pixelWidth) ?? 0
+        self.pixelHeight = try c.decodeIfPresent(Int.self, forKey: .pixelHeight) ?? 0
+        self.centerX = try c.decodeIfPresent(Double.self, forKey: .centerX) ?? 0
+        self.centerY = try c.decodeIfPresent(Double.self, forKey: .centerY) ?? 0
+        self.scaleX = try c.decodeIfPresent(Double.self, forKey: .scaleX) ?? 1
+        self.scaleY = try c.decodeIfPresent(Double.self, forKey: .scaleY) ?? 1
+        self.rotationDeg = try c.decodeIfPresent(Double.self, forKey: .rotationDeg) ?? 0
+        self.flipH = try c.decodeIfPresent(Bool.self, forKey: .flipH) ?? false
+        self.flipV = try c.decodeIfPresent(Bool.self, forKey: .flipV) ?? false
+        self.edgeOffset = try c.decodeIfPresent(Double.self, forKey: .edgeOffset) ?? 0
+        self.edgeFeather = try c.decodeIfPresent(Double.self, forKey: .edgeFeather) ?? 0
+        self.edgeThreshold = try c.decodeIfPresent(Double.self, forKey: .edgeThreshold) ?? 0
+    }
+    // Memberwise-ish init used by DocumentStore.placeSmartImage.
+    init(sourcePath: String? = nil,
+         sourceBytes: Data? = nil,
+         sourceFormat: String = "png",
+         pixelWidth: Int,
+         pixelHeight: Int,
+         centerX: Double,
+         centerY: Double,
+         scaleX: Double = 1,
+         scaleY: Double = 1) {
+        self.sourcePath = sourcePath
+        self.sourceBytes = sourceBytes
+        self.sourceFormat = sourceFormat
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.centerX = centerX
+        self.centerY = centerY
+        self.scaleX = scaleX
+        self.scaleY = scaleY
+    }
+}
+
+@Observable
+final class PXLayer: Identifiable {
+    let id: UUID
+    var name: String
+    var kind: LayerKind
+    var visible: Bool = true
+    var opacity: Double = 1
+    var blend: BlendMode = .normal
+    var offset: CGSize = .zero
+
+    // raster image buffer (nil for other kinds). Stored at document resolution.
+    var raster: CGImage?
+
+    // type-specific content
+    var text: TextContent = TextContent()
+    var gradient: GradientContent = GradientContent()
+    var solid: SolidContent = SolidContent()
+    var smart: SmartSource?     // non-nil → this raster layer is a Smart Object; always rendered from source.
+
+    // per-layer processing
+    var adjust = Adjustments()
+    var filters = Filters()
+    var relight = Relight()
+    var skin = SkinRetouch()
+    var styles = LayerStyles()
+    var studioRelight = StudioRelight()
+
+    init(id: UUID = UUID(), name: String, kind: LayerKind) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+    }
+}

@@ -1,0 +1,325 @@
+import Foundation
+import Observation
+import AppKit
+import CoreGraphics
+
+@Observable
+@MainActor
+final class DocumentStore {
+    var canvasSize = CGSize(width: 1280, height: 720)
+    var backgroundColor: ColorRGB = ColorRGB(r: 0.05, g: 0.07, b: 0.12)
+    var layers: [PXLayer] = []
+    var activeLayerID: UUID?
+    var tool: Tool = .move
+    var foreground: ColorRGB = ColorRGB(r: 1.0, g: 0.8, b: 0.0)
+    var brush = BrushSettings()
+    var currentFileURL: URL?
+    var isDirty: Bool = false
+    var viewportZoom: Double = 1.0     // trackpad pinch / shortcut zoom
+    var viewportZoomBase: Double = 1.0
+    var recentFiles: [URL] = []
+    var showSafeArea: Bool = false
+    var showRuleOfThirds: Bool = false
+    var showGoldenRatio: Bool = false
+    var showYTCornerRadius: Bool = false
+    var showYTDurationPill: Bool = false
+    var undoStack: [DocumentSnapshot] = []
+    var redoStack: [DocumentSnapshot] = []
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+    private let maxHistory = 50
+    private var coalescingName: String? = nil    // when set, consecutive checkpoints with this name fold into the previous one
+    private var watchers: [UUID: FileWatcher] = [:]
+    private let recentsKey = "ai.taiso.Thumbz.recentFiles"
+    private let recentsMax = 10
+    // Debug / test harness server. Enabled by default in Debug builds; can be
+    // toggled at runtime from Debug → Control Server.
+    var controlServerEnabled: Bool = true
+    var controlServerPort: Int = 7979
+    /// Marquee selection in doc (top-down) coords. nil = no selection. Used by
+    /// Generative Fill to constrain the regenerated region.
+    var selectionRect: CGRect?
+    /// Generative-fill progress message — non-nil while a fill is in flight.
+    var generativeProgress: String?
+
+    // re-render ticker — bumped whenever a change should trigger recomposite
+    private(set) var renderTick: Int = 0
+
+    init() {
+        let bg = PXLayer(name: "Background Gradient", kind: .gradient)
+        bg.gradient = GradientContent(
+            kind: "linear",
+            c1: ColorRGB(r: 0.10, g: 0.14, b: 0.25), s1: 0,
+            c2: ColorRGB(r: 0.49, g: 0.18, b: 0.42), s2: 1,
+            angle: 135, center: .init(x: 0.5, y: 0.5), radius: 0.7
+        )
+        let title = PXLayer(name: "Hero Text", kind: .text)
+        title.text.string = "EPIC\nTITLE"
+        title.text.fontSize = 220
+        title.styles.stroke = Stroke(enabled: true, color: .black, size: 10, opacity: 1)
+        title.styles.dropShadow = DropShadow(enabled: true, color: .black, opacity: 0.7, distance: 10, angle: 135, blur: 20)
+
+        self.layers = [bg, title]
+        self.activeLayerID = title.id
+        self.recentFiles = loadRecents()
+    }
+
+    private func loadRecents() -> [URL] {
+        guard let raw = UserDefaults.standard.array(forKey: recentsKey) as? [String] else { return [] }
+        return raw.compactMap { path in
+            let u = URL(fileURLWithPath: path)
+            return FileManager.default.fileExists(atPath: u.path) ? u : nil
+        }
+    }
+    private func persistRecents() {
+        UserDefaults.standard.set(recentFiles.map(\.path), forKey: recentsKey)
+    }
+    func recordRecent(_ url: URL) {
+        recentFiles.removeAll { $0 == url }
+        recentFiles.insert(url, at: 0)
+        if recentFiles.count > recentsMax { recentFiles.removeLast(recentFiles.count - recentsMax) }
+        persistRecents()
+    }
+    func removeRecent(_ url: URL) {
+        recentFiles.removeAll { $0 == url }
+        persistRecents()
+    }
+    func clearRecents() {
+        recentFiles.removeAll()
+        persistRecents()
+        NSDocumentController.shared.clearRecentDocuments(nil)
+    }
+
+    var activeLayer: PXLayer? {
+        layers.first(where: { $0.id == activeLayerID })
+    }
+
+    func invalidate() { renderTick &+= 1; isDirty = true }
+
+    // MARK: - Undo / Redo
+    //
+    // Snapshot-based history. Call `checkpoint(name:)` BEFORE a mutation that should
+    // be undoable. Pass `coalesceWith:` to merge with the previous checkpoint (for
+    // continuous gestures like slider drags) — only the first state in a run is kept.
+
+    func checkpoint(_ name: String, coalesceWith: String? = nil) {
+        if let coalesce = coalesceWith, coalescingName == coalesce {
+            return // already have the pre-state
+        }
+        undoStack.append(makeSnapshot())
+        if undoStack.count > maxHistory { undoStack.removeFirst(undoStack.count - maxHistory) }
+        redoStack.removeAll()
+        coalescingName = coalesceWith
+    }
+
+    func endCoalescing() { coalescingName = nil }
+
+    func performUndo() {
+        guard let snap = undoStack.popLast() else { return }
+        redoStack.append(makeSnapshot())
+        apply(snap)
+        tlog("undo → restored snapshot")
+    }
+
+    func performRedo() {
+        guard let snap = redoStack.popLast() else { return }
+        undoStack.append(makeSnapshot())
+        apply(snap)
+        tlog("redo → reapplied snapshot")
+    }
+
+    func addLayer(_ layer: PXLayer) {
+        checkpoint("Add Layer")
+        layers.append(layer)
+        activeLayerID = layer.id
+        if layer.smart != nil { startWatching(layer) }
+        invalidate()
+    }
+
+    /// Create a Smart Object layer from an image on disk. Lossless — keeps source.
+    @discardableResult
+    func placeSmartImage(from url: URL) -> PXLayer? {
+        guard let loaded = SmartImageLoader.load(from: url) else { return nil }
+        let sw = CGFloat(loaded.cgImage.width), sh = CGFloat(loaded.cgImage.height)
+        let fit = SmartObjectEngine.initialTransform(sourceSize: CGSize(width: sw, height: sh), canvas: canvasSize)
+        var smart = SmartSource(
+            sourcePath: url.path,
+            sourceBytes: loaded.data,
+            sourceFormat: loaded.format,
+            pixelWidth: loaded.cgImage.width,
+            pixelHeight: loaded.cgImage.height,
+            centerX: fit.cx,
+            centerY: fit.cy,
+            scaleX: fit.scale,
+            scaleY: fit.scale
+        )
+        // Try to capture a security-scoped bookmark so we can re-read after sandbox restart.
+        if let bm = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+            smart.sourceURLBookmark = bm
+        }
+        let name = url.deletingPathExtension().lastPathComponent
+        let L = PXLayer(name: name, kind: .raster)
+        L.smart = smart
+        addLayer(L)
+        return L
+    }
+
+    /// Create a Smart Object from in-memory image bytes (for pasted / dropped data
+    /// without a backing file). Embeds the bytes; no external editing available.
+    @discardableResult
+    func placeSmartImage(data: Data, format: String) -> PXLayer? {
+        guard let cg = SmartObjectEngine.decode(data) else { return nil }
+        let sw = CGFloat(cg.width), sh = CGFloat(cg.height)
+        let fit = SmartObjectEngine.initialTransform(sourceSize: CGSize(width: sw, height: sh), canvas: canvasSize)
+        let smart = SmartSource(
+            sourcePath: nil,
+            sourceBytes: data,
+            sourceFormat: format,
+            pixelWidth: cg.width,
+            pixelHeight: cg.height,
+            centerX: fit.cx,
+            centerY: fit.cy,
+            scaleX: fit.scale,
+            scaleY: fit.scale
+        )
+        let L = PXLayer(name: "Smart Image", kind: .raster)
+        L.smart = smart
+        addLayer(L)
+        return L
+    }
+
+    private func startWatching(_ layer: PXLayer) {
+        guard let path = layer.smart?.sourcePath else { return }
+        let id = layer.id
+        let watcher = FileWatcher(path: path) { [weak self, weak layer] in
+            guard let self, let layer else { return }
+            // Re-read source bytes so we pick up external edits.
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+                layer.smart?.sourceBytes = data
+                self.invalidate()
+            }
+            _ = id
+        }
+        watchers[id] = watcher
+    }
+
+    func stopWatching(_ id: UUID) {
+        watchers[id] = nil
+    }
+
+    /// Open the smart layer's source file in the OS default app. If only embedded bytes
+    /// are available, writes them to a user-visible temp file and opens that; the watcher
+    /// will auto-reload when the editor saves.
+    func openSmartLayerInExternalEditor(_ layer: PXLayer) {
+        guard let smart = layer.smart else { return }
+        if let path = smart.sourcePath, FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            return
+        }
+        guard let bytes = smart.sourceBytes else { return }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Thumbz-Smart", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(layer.id.uuidString).\(smart.sourceFormat)")
+        try? bytes.write(to: url, options: .atomic)
+        layer.smart?.sourcePath = url.path
+        startWatching(layer)
+        NSWorkspace.shared.open(url)
+    }
+
+    func removeActive() {
+        guard let id = activeLayerID, let ix = layers.firstIndex(where: { $0.id == id }) else { return }
+        checkpoint("Delete Layer")
+        layers.remove(at: ix)
+        activeLayerID = layers.last?.id
+        invalidate()
+    }
+
+    func duplicateActive() {
+        guard let src = activeLayer else { return }
+        let copy = PXLayer(name: src.name + " copy", kind: src.kind)
+        copy.visible = src.visible
+        copy.opacity = src.opacity
+        copy.blend = src.blend
+        copy.offset = src.offset
+        copy.raster = src.raster
+        copy.text = src.text
+        copy.gradient = src.gradient
+        copy.solid = src.solid
+        copy.adjust = src.adjust
+        copy.filters = src.filters
+        copy.relight = src.relight
+        copy.skin = src.skin
+        copy.styles = src.styles
+        copy.offset = CGSize(width: src.offset.width + 12, height: src.offset.height + 12)
+        addLayer(copy)
+    }
+
+    func move(_ id: UUID, to newIndex: Int) {
+        guard let ix = layers.firstIndex(where: { $0.id == id }) else { return }
+        let layer = layers.remove(at: ix)
+        let target = min(max(newIndex, 0), layers.count)
+        layers.insert(layer, at: target)
+        invalidate()
+    }
+
+    // Z-order helpers — "front" in UI / composite terms means the LAST item in
+    // layers (composited on top). "Back" = index 0.
+    func moveToFront(_ id: UUID) {
+        guard let ix = layers.firstIndex(where: { $0.id == id }), ix < layers.count - 1 else { return }
+        checkpoint("Bring to Front")
+        let layer = layers.remove(at: ix)
+        layers.append(layer)
+        invalidate()
+    }
+    func moveForward(_ id: UUID) {
+        guard let ix = layers.firstIndex(where: { $0.id == id }), ix < layers.count - 1 else { return }
+        checkpoint("Bring Forward")
+        layers.swapAt(ix, ix + 1)
+        invalidate()
+    }
+    func moveBackward(_ id: UUID) {
+        guard let ix = layers.firstIndex(where: { $0.id == id }), ix > 0 else { return }
+        checkpoint("Send Backward")
+        layers.swapAt(ix, ix - 1)
+        invalidate()
+    }
+    func moveToBack(_ id: UUID) {
+        guard let ix = layers.firstIndex(where: { $0.id == id }), ix > 0 else { return }
+        checkpoint("Send to Back")
+        let layer = layers.remove(at: ix)
+        layers.insert(layer, at: 0)
+        invalidate()
+    }
+}
+
+enum Tool: String, CaseIterable, Sendable {
+    case move, marquee, pencil, pen, eraser, text, eyedropper, relight
+    var symbol: String {
+        switch self {
+        case .move: return "arrow.up.and.down.and.arrow.left.and.right"
+        case .marquee: return "rectangle.dashed"
+        case .pencil: return "pencil.tip"
+        case .pen: return "scribble.variable"
+        case .eraser: return "eraser"
+        case .text: return "textformat"
+        case .eyedropper: return "eyedropper"
+        case .relight: return "sun.max"
+        }
+    }
+    var label: String {
+        switch self {
+        case .move: return "Move"; case .marquee: return "Marquee"
+        case .pencil: return "Pencil"; case .pen: return "Pen"
+        case .eraser: return "Eraser"; case .text: return "Text"; case .eyedropper: return "Eyedropper"
+        case .relight: return "Relight"
+        }
+    }
+}
+
+struct BrushSettings: Sendable {
+    var size: Double = 40
+    var feather: Double = 0.6     // 0...1
+    var opacity: Double = 1
+    var flow: Double = 1
+    var smoothing: Double = 0.4
+}

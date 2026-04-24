@@ -1,0 +1,91 @@
+import SwiftUI
+import AppKit
+
+@main
+struct ThumbzApp: App {
+    @State private var store = DocumentStore()
+    @NSApplicationDelegateAdaptor(ThumbzAppDelegate.self) private var appDelegate
+
+    var body: some Scene {
+        WindowGroup("Thumbz") {
+            MainWindow()
+                .environment(store)
+                .frame(minWidth: 1280, minHeight: 800)
+                .task {
+                    appDelegate.attach(store: store)
+                    if store.controlServerEnabled {
+                        ControlServer.shared.start(on: store.controlServerPort, store: store)
+                    }
+                }
+                .onOpenURL { url in
+                    ThumbzApp.loadFile(url: url, into: store)
+                }
+        }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: true))
+        .commands {
+            AppCommands(store: store)
+            DebugCommands()
+        }
+
+        Window("Debug Console", id: "debug-console") {
+            DebugConsoleView()
+        }
+        .defaultSize(width: 920, height: 440)
+    }
+
+    @MainActor
+    static func loadFile(url: URL, into store: DocumentStore) {
+        let ext = url.pathExtension.lowercased()
+        if ext == "thumbz" || ext == "json" {
+            do {
+                let data = try Data(contentsOf: url)
+                let snap = try JSONDecoder().decode(DocumentSnapshot.self, from: data)
+                store.apply(snap)
+                store.currentFileURL = url
+                store.isDirty = false
+                store.recordRecent(url)
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                tlog("opened project: \(url.path)")
+            } catch {
+                tlog("open failed: \(error)")
+                let alert = NSAlert()
+                alert.messageText = "Could not open \(url.lastPathComponent)"
+                alert.informativeText = error.localizedDescription
+                alert.runModal()
+            }
+        } else {
+            _ = store.placeSmartImage(from: url)
+            tlog("placed image from: \(url.path)")
+        }
+    }
+}
+
+@MainActor
+final class ThumbzAppDelegate: NSObject, NSApplicationDelegate {
+    static let shared = ThumbzAppDelegate()
+    private weak var store: DocumentStore?
+    var liveStore: DocumentStore? { store }
+    private var pending: [URL] = []
+
+    func attach(store: DocumentStore) {
+        self.store = store
+        let buffered = pending
+        pending.removeAll()
+        for u in buffered { ThumbzApp.loadFile(url: u, into: store) }
+    }
+
+    nonisolated func application(_ application: NSApplication, open urls: [URL]) {
+        // AppKit delivers this on the main thread already; hop to MainActor for Swift 6 compliance.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let store = self.store {
+                for u in urls { ThumbzApp.loadFile(url: u, into: store) }
+            } else {
+                self.pending.append(contentsOf: urls)
+            }
+        }
+    }
+
+    nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
