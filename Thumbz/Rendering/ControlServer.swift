@@ -225,6 +225,49 @@ final class ControlServer {
                     try? png.write(to: URL(fileURLWithPath: path))
                 }
             }
+        case "placeImagePath":
+            // Load a PNG/JPEG from disk and place as a Smart Object scaled to fit the canvas.
+            // Uses the smart-image data path so AI features (Expand etc.) can see source bytes.
+            if let path = obj["path"] as? String {
+                let url = URL(fileURLWithPath: path)
+                if let layer = store.placeSmartImage(from: url) {
+                    return jsonResponse(["ok": true, "id": layer.id.uuidString])
+                }
+                return httpResponse(status: 500, body: "Could not place image at \(path)")
+            }
+            return httpResponse(status: 400, body: "Missing 'path'")
+        case "runExpand":
+            // Run the Expand pipeline against the current store. Synchronous from the
+            // caller's perspective: blocks the HTTP response until the pipeline finishes.
+            // Returns the paths of all dump files generated under the sandbox tmp.
+            let prompt = (obj["prompt"] as? String) ?? "seamless continuation of the existing photo, matching texture, color and lighting, photorealistic"
+            let strength = (obj["strength"] as? Double).map(Float.init) ?? 0.95
+            guard LocalSDInpaintService.isModelInstalled else {
+                return httpResponse(status: 412, body: "Local SD model not installed")
+            }
+            let service = LocalSDInpaintService(modelDirectory: LocalSDInpaintService.defaultModelDirectory,
+                                                 strength: strength)
+            let group = DispatchGroup()
+            group.enter()
+            var threwError: String?
+            Task { @MainActor in
+                do {
+                    try await GenerativeFillCoordinator.fill(store: store, mode: .expand, prompt: prompt, service: service)
+                } catch {
+                    threwError = error.localizedDescription
+                }
+                group.leave()
+            }
+            // Synchronously wait. ControlServer runs off the main queue, so this is OK.
+            group.wait()
+            if let threwError {
+                return httpResponse(status: 500, body: "Expand failed: \(threwError)")
+            }
+            let tmp = NSTemporaryDirectory()
+            let dumps = (try? FileManager.default.contentsOfDirectory(atPath: tmp)
+                .filter { $0.hasPrefix("thumbz-expand-") })?
+                .map { (tmp as NSString).appendingPathComponent($0) }.sorted() ?? []
+            return jsonResponse(["ok": true, "dumps": dumps, "tmp": tmp])
         default:
             return httpResponse(status: 400, body: "Unknown action type: \(type)")
         }

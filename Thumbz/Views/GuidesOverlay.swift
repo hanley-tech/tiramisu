@@ -76,6 +76,13 @@ struct GuidesOverlay: View {
                            style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
 
+            if store.showYTBannerSafeAreas {
+                drawBannerSafeAreas(ctx: ctx, size: size)
+            }
+            if store.showPFPCircleMask {
+                drawPFPCircle(ctx: ctx, size: size)
+            }
+
             if store.showYTDurationPill {
                 // Rounded "12:34" pill, bottom-right corner. ~58x20 pt in YT UI at 320x180
                 // thumbnail which is ~18% × 11% of the frame.
@@ -93,6 +100,95 @@ struct GuidesOverlay: View {
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// YouTube channel banner safe areas. Banner canvas is 2560×1440. Within
+    /// it, content visibility varies by device:
+    ///   • TV (full)        2560 × 1440  — entire canvas
+    ///   • Desktop          2560 × 423   — middle horizontal strip
+    ///   • Tablet           1855 × 423
+    ///   • Mobile (safest)  1546 × 423   — center, all-device-visible zone
+    /// We render relative to the current canvas size so this works even if the
+    /// user picked a non-standard banner resolution.
+    private func drawBannerSafeAreas(ctx: GraphicsContext, size: CGSize) {
+        let cw = size.width, ch = size.height
+        // Treat the canvas as 2560×1440 banner aspect ratio.
+        let cy = ch / 2
+
+        // Each zone's HEIGHT relative to 1440: 423/1440 ≈ 0.294
+        let zoneH = ch * (423.0 / 1440.0)
+        let zoneTop = cy - zoneH / 2
+        let zoneBot = cy + zoneH / 2
+
+        // Widths (in canvas pixels)
+        let mobileW  = cw * (1546.0 / 2560.0)   // safe on all devices
+        let tabletW  = cw * (1855.0 / 2560.0)
+        let desktopW = cw                        // full
+
+        // Helper to draw a centered rectangle.
+        func zone(width: CGFloat, color: Color, label: String) {
+            let x = (cw - width) / 2
+            let r = CGRect(x: x, y: zoneTop, width: width, height: zoneBot - zoneTop)
+            ctx.stroke(Path(r),
+                       with: .color(color),
+                       style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            // Label tucked just inside the upper-left corner.
+            let text = Text(label)
+                .font(.system(size: max(10, ch * 0.011), weight: .semibold))
+                .foregroundStyle(color)
+            ctx.draw(text, at: CGPoint(x: x + 6, y: zoneTop + 10), anchor: .topLeading)
+        }
+
+        // TV outer (full canvas)
+        ctx.stroke(Path(CGRect(x: 0, y: 0, width: cw, height: ch)),
+                   with: .color(.purple.opacity(0.6)),
+                   style: StrokeStyle(lineWidth: 1.5))
+        let tvText = Text("TV / Full Banner 2560×1440")
+            .font(.system(size: max(10, ch * 0.011), weight: .semibold))
+            .foregroundStyle(.purple.opacity(0.85))
+        ctx.draw(tvText, at: CGPoint(x: 6, y: 6), anchor: .topLeading)
+
+        // Desktop strip
+        zone(width: desktopW, color: .blue.opacity(0.7), label: "Desktop 2560×423")
+        // Tablet
+        zone(width: tabletW,  color: .green.opacity(0.7), label: "Tablet 1855×423")
+        // Mobile (the safest zone — emphasize)
+        zone(width: mobileW,  color: .orange,            label: "Mobile-safe 1546×423 — keep logos & text here")
+    }
+
+    /// Profile-picture circle mask. Most platforms (YouTube, Twitter/X, Discord,
+    /// Slack, etc.) crop avatars to a circle inscribed in the square canvas.
+    /// We darken the area OUTSIDE the circle so the user sees exactly what
+    /// will be visible. Also draws an inner "safe ring" at ~92% so logos
+    /// and small text don't get clipped by platform borders.
+    private func drawPFPCircle(ctx: GraphicsContext, size: CGSize) {
+        let side = min(size.width, size.height)
+        let cx = size.width / 2, cy = size.height / 2
+        let outerR = side / 2
+
+        // Dim the corners (what will be cropped off by the circle mask).
+        var cutout = Path(CGRect(origin: .zero, size: size))
+        cutout.addPath(Path(ellipseIn: CGRect(x: cx - outerR, y: cy - outerR,
+                                              width: outerR * 2, height: outerR * 2)))
+        ctx.fill(cutout, with: .color(.black.opacity(0.45)), style: FillStyle(eoFill: true))
+
+        // Outline the visible circle in white.
+        let outerRect = CGRect(x: cx - outerR, y: cy - outerR, width: outerR * 2, height: outerR * 2)
+        ctx.stroke(Path(ellipseIn: outerRect),
+                   with: .color(.white.opacity(0.9)),
+                   style: StrokeStyle(lineWidth: 1.5))
+
+        // Inner safe ring (logos/text inside this circle are guaranteed safe).
+        let safeR = outerR * 0.92
+        let safeRect = CGRect(x: cx - safeR, y: cy - safeR, width: safeR * 2, height: safeR * 2)
+        ctx.stroke(Path(ellipseIn: safeRect),
+                   with: .color(.cyan.opacity(0.7)),
+                   style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+        let label = Text("PFP — keep important content inside cyan ring")
+            .font(.system(size: max(10, side * 0.012), weight: .medium))
+            .foregroundStyle(.white.opacity(0.9))
+        ctx.draw(label, at: CGPoint(x: cx, y: cy + outerR + 14), anchor: .top)
     }
 
     private func drawGoldenSpiral(ctx: GraphicsContext, size: CGSize, color: Color) {

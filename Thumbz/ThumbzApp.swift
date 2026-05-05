@@ -37,26 +37,28 @@ struct ThumbzApp: App {
     @MainActor
     static func loadFile(url: URL, into store: DocumentStore) {
         let ext = url.pathExtension.lowercased()
+        let target = FileBookmarks.resolve(path: url.path) ?? url
         if ext == "thumbz" || ext == "json" {
             do {
-                let data = try Data(contentsOf: url)
+                let data = try FileBookmarks.withScope(target) { try Data(contentsOf: $0) }
                 let snap = try JSONDecoder().decode(DocumentSnapshot.self, from: data)
                 store.apply(snap)
-                store.currentFileURL = url
+                store.currentFileURL = target
                 store.isDirty = false
-                store.recordRecent(url)
-                NSDocumentController.shared.noteNewRecentDocumentURL(url)
-                tlog("opened project: \(url.path)")
+                store.recordRecent(target)
+                FileBookmarks.store(for: target)
+                NSDocumentController.shared.noteNewRecentDocumentURL(target)
+                tlog("opened project: \(target.path)")
             } catch {
                 tlog("open failed: \(error)")
                 let alert = NSAlert()
-                alert.messageText = "Could not open \(url.lastPathComponent)"
+                alert.messageText = "Could not open \(target.lastPathComponent)"
                 alert.informativeText = error.localizedDescription
                 alert.runModal()
             }
         } else {
-            _ = store.placeSmartImage(from: url)
-            tlog("placed image from: \(url.path)")
+            _ = FileBookmarks.withScope(target) { store.placeSmartImage(from: $0) }
+            tlog("placed image from: \(target.path)")
         }
     }
 }

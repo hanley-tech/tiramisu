@@ -4,10 +4,11 @@ struct ToolSidebar: View {
     @Environment(DocumentStore.self) private var store
 
     var body: some View {
+        // Use a List for the sidebar content — gets the standard macOS
+        // sidebar material background + automatic safe-area inset for the
+        // title bar (no manual 28-pt spacer needed). Traffic lights sit on
+        // the same vibrancy as the rest of the sidebar = no visible seam.
         VStack(spacing: 4) {
-            // Clear the window title bar — the traffic light cluster sits in that
-            // region and would otherwise render on top of the first tool button.
-            Spacer().frame(height: 28)
             ForEach(Tool.allCases, id: \.self) { tool in
                 Button {
                     store.tool = tool
@@ -34,6 +35,5 @@ struct ToolSidebar: View {
         }
         .padding(.vertical, 8)
         .frame(maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor))
     }
 }

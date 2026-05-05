@@ -2,24 +2,35 @@ import SwiftUI
 
 struct EffectsTab: View {
     @Environment(DocumentStore.self) private var store
+    @State private var displayedID: UUID?
+    private var displayedLayer: PXLayer? {
+        store.layers.first(where: { $0.id == displayedID })
+    }
     var body: some View {
-        if let layer = store.activeLayer {
-            VStack(spacing: 0) {
-                SectionDisclosure(title: "DROP SHADOW", defaultOpen: true) {
-                    DropShadowPanel(layer: layer)
+        let _ = perfMark("EffectsTab.body")
+        Group {
+            if let layer = displayedLayer {
+                VStack(spacing: 0) {
+                    SectionDisclosure(title: "DROP SHADOW", defaultOpen: true) {
+                        DropShadowPanel(layer: layer)
+                    }
+                    SectionDisclosure(title: "OUTER GLOW", defaultOpen: false) {
+                        OuterGlowPanel(layer: layer)
+                    }
+                    SectionDisclosure(title: "STROKE", defaultOpen: false) {
+                        StrokePanel(layer: layer)
+                    }
+                    SectionDisclosure(title: "GRADIENT FILL", defaultOpen: false) {
+                        GradientFillPanel(layer: layer)
+                    }
                 }
-                SectionDisclosure(title: "OUTER GLOW", defaultOpen: false) {
-                    OuterGlowPanel(layer: layer)
-                }
-                SectionDisclosure(title: "STROKE", defaultOpen: false) {
-                    StrokePanel(layer: layer)
-                }
-                SectionDisclosure(title: "GRADIENT FILL", defaultOpen: false) {
-                    GradientFillPanel(layer: layer)
-                }
+            } else {
+                Text("Select a layer.").foregroundStyle(.secondary).padding()
             }
-        } else {
-            Text("Select a layer.").foregroundStyle(.secondary).padding()
+        }
+        .task(id: store.activeLayerID) {
+            await Task.yield()
+            displayedID = store.activeLayerID
         }
     }
 }

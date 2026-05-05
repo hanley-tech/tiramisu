@@ -24,6 +24,8 @@ struct AppCommands: Commands {
             Divider()
             Button("Place Image…") { placeImage() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button("Paste Image as New Layer") { pasteImageFromClipboard() }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { save() }
@@ -33,6 +35,8 @@ struct AppCommands: Commands {
             Divider()
             Button("Export PNG…") { exportPNG() }
                 .keyboardShortcut("e", modifiers: [.command])
+            Button("Copy Composite to Clipboard") { copyCompositeToClipboard() }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
         }
         CommandMenu("AI") {
             Button("Generative Fill…") { GenerativeFillUI.present(store: store) }
@@ -83,18 +87,23 @@ struct AppCommands: Commands {
         panel.title = "Open Thumbz Project"
         panel.message = "Choose a .thumbz project file"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        FileBookmarks.store(for: url)
         openFile(url: url)
     }
 
     fileprivate func openFile(url: URL) {
+        // Prefer the bookmark-resolved URL if we have one — that's what carries
+        // sandbox access after a restart for files on external volumes / iCloud.
+        let target = FileBookmarks.resolve(path: url.path) ?? url
         do {
-            let data = try Data(contentsOf: url)
+            let data = try FileBookmarks.withScope(target) { try Data(contentsOf: $0) }
             let snap = try JSONDecoder().decode(DocumentSnapshot.self, from: data)
             store.apply(snap)
-            store.currentFileURL = url
+            store.currentFileURL = target
             store.isDirty = false
-            store.recordRecent(url)
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            store.recordRecent(target)
+            FileBookmarks.store(for: target)
+            NSDocumentController.shared.noteNewRecentDocumentURL(target)
         } catch let DecodingError.keyNotFound(key, ctx) {
             presentError("Project is from an older build",
                          detail: "Missing key '\(key.stringValue)' at \(ctx.codingPath.map(\.stringValue).joined(separator: "."))\n\n\(ctx.debugDescription)")
@@ -131,21 +140,34 @@ struct AppCommands: Commands {
         panel.allowedContentTypes = [thumbzType]
         panel.nameFieldStringValue = store.currentFileURL?.deletingPathExtension().lastPathComponent ?? "Untitled.thumbz"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        FileBookmarks.store(for: url)
         writeProject(to: url)
         store.currentFileURL = url
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
     }
 
     private func writeProject(to url: URL) {
+        let target = FileBookmarks.resolve(path: url.path) ?? url
         do {
             let snap = store.makeSnapshot()
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(snap)
-            try data.write(to: url, options: .atomic)
+            try FileBookmarks.withScope(target) { resolved in
+                // .atomic writes a sibling temp file then renames; on some sandbox
+                // + external-volume combos that fails. Fall back to a plain write
+                // if the atomic path errors out.
+                do {
+                    try data.write(to: resolved, options: .atomic)
+                } catch {
+                    tlog("atomic write failed (\(error.localizedDescription)) — retrying non-atomic")
+                    try data.write(to: resolved)
+                }
+            }
             store.isDirty = false
-            store.recordRecent(url)
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            store.recordRecent(target)
+            FileBookmarks.store(for: target)
+            NSDocumentController.shared.noteNewRecentDocumentURL(target)
         } catch {
             presentError("Could not save document", error: error)
         }
@@ -174,11 +196,67 @@ struct AppCommands: Commands {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let img = NSImage(contentsOf: url),
-              let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-        let L = PXLayer(name: url.deletingPathExtension().lastPathComponent, kind: .raster)
-        L.raster = LayerRenderer.fit(cg, into: store.canvasSize)
-        store.addLayer(L)
+        FileBookmarks.store(for: url)
+        // Place as a Smart Object so transforms stay non-destructive and AI
+        // features (Expand, Remove BG, etc.) can read the original source bytes.
+        _ = FileBookmarks.withScope(url) { resolved in
+            store.placeSmartImage(from: resolved)
+        }
+    }
+
+    private func pasteImageFromClipboard() {
+        let pb = NSPasteboard.general
+
+        // Try common image data flavors directly off the pasteboard.
+        let candidates: [(NSPasteboard.PasteboardType, String)] = [
+            (.png, "png"),
+            (NSPasteboard.PasteboardType("public.heic"), "heic"),
+            (NSPasteboard.PasteboardType("public.jpeg"), "jpeg"),
+            (NSPasteboard.PasteboardType("org.webmproject.webp"), "webp"),
+            (.tiff, "tiff"),
+        ]
+        for (type, ext) in candidates {
+            if let data = pb.data(forType: type), !data.isEmpty {
+                if let L = store.placeSmartImage(data: data, format: ext) {
+                    L.name = "Pasted Image"
+                    tlog("Pasted image from clipboard (\(data.count) bytes, \(ext))")
+                    return
+                }
+            }
+        }
+
+        // Fallback: a file URL on the pasteboard (e.g. copied from Finder).
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let url = urls.first,
+           let data = try? Data(contentsOf: url), !data.isEmpty {
+            let ext = url.pathExtension.lowercased().isEmpty ? "png" : url.pathExtension.lowercased()
+            if let L = store.placeSmartImage(data: data, format: ext) {
+                L.name = url.deletingPathExtension().lastPathComponent
+                tlog("Pasted image from file URL clipboard (\(data.count) bytes, \(ext))")
+                return
+            }
+        }
+
+        tlog("Paste: no image data on clipboard (types: \(pb.types?.map(\.rawValue) ?? []))")
+        NSSound.beep()
+    }
+
+    private func copyCompositeToClipboard() {
+        guard let image = LayerRenderer.composite(store: store) else {
+            NSSound.beep()
+            return
+        }
+        let rep = NSBitmapImageRep(cgImage: image)
+        rep.size = NSSize(width: image.width, height: image.height)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            NSSound.beep(); return
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setData(png, forType: .png)
+        // Also offer it as TIFF for apps that prefer it.
+        if let tiff = rep.tiffRepresentation { pb.setData(tiff, forType: .tiff) }
+        tlog("Copied composite to clipboard (\(image.width)x\(image.height), \(png.count) bytes)")
     }
 
     private func exportPNG() {
@@ -321,14 +399,16 @@ struct RecentFilesMenu: View {
     }
 
     fileprivate func openFileFromRecent(url: URL) {
+        let target = FileBookmarks.resolve(path: url.path) ?? url
         do {
-            let data = try Data(contentsOf: url)
+            let data = try FileBookmarks.withScope(target) { try Data(contentsOf: $0) }
             let snap = try JSONDecoder().decode(DocumentSnapshot.self, from: data)
             store.apply(snap)
-            store.currentFileURL = url
+            store.currentFileURL = target
             store.isDirty = false
-            store.recordRecent(url)
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            store.recordRecent(target)
+            FileBookmarks.store(for: target)
+            NSDocumentController.shared.noteNewRecentDocumentURL(target)
         } catch {
             let alert = NSAlert()
             alert.messageText = "Could not open document"

@@ -34,12 +34,22 @@ private struct CanvasToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Menu {
-                Button("YouTube 1280 × 720") { setSize(1280, 720) }
-                Button("FHD 1920 × 1080") { setSize(1920, 1080) }
-                Button("2K 2560 × 1440") { setSize(2560, 1440) }
-                Button("4K UHD 3840 × 2160") { setSize(3840, 2160) }
-                Button("Square 1080 × 1080") { setSize(1080, 1080) }
-                Button("Vertical 1080 × 1920") { setSize(1080, 1920) }
+                Section("Thumbnails") {
+                    Button("YouTube 1280 × 720") { setSize(1280, 720) }
+                    Button("FHD 1920 × 1080") { setSize(1920, 1080) }
+                    Button("2K 2560 × 1440") { setSize(2560, 1440) }
+                    Button("4K UHD 3840 × 2160") { setSize(3840, 2160) }
+                }
+                Section("Channel Art") {
+                    Button("YouTube Banner 2560 × 1440") { setSize(2560, 1440) }
+                }
+                Section("Avatars") {
+                    Button("Profile Picture 1024 × 1024") { setSize(1024, 1024) }
+                }
+                Section("Other") {
+                    Button("Square 1080 × 1080") { setSize(1080, 1080) }
+                    Button("Vertical 1080 × 1920") { setSize(1080, 1920) }
+                }
             } label: {
                 Label("Canvas \(Int(store.canvasSize.width))×\(Int(store.canvasSize.height))",
                       systemImage: "rectangle.dashed")
@@ -59,6 +69,10 @@ private struct CanvasToolbar: ToolbarContent {
                 Toggle("YouTube Safe Area", isOn: $store.showSafeArea)
                 Toggle("YouTube Rounded Corners", isOn: $store.showYTCornerRadius)
                 Toggle("YouTube Duration Pill", isOn: $store.showYTDurationPill)
+                Divider()
+                Toggle("YouTube Banner Safe Areas", isOn: $store.showYTBannerSafeAreas)
+                Divider()
+                Toggle("PFP Circle Mask", isOn: $store.showPFPCircleMask)
             } label: {
                 Label("Guides", systemImage: "squareshape.split.3x3")
             }

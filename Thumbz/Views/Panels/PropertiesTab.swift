@@ -4,9 +4,16 @@ import AppKit
 
 struct PropertiesTab: View {
     @Environment(DocumentStore.self) private var store
+    @State private var displayedID: UUID?
+
+    private var displayedLayer: PXLayer? {
+        store.layers.first(where: { $0.id == displayedID })
+    }
 
     var body: some View {
-        if let layer = store.activeLayer {
+        let _ = perfMark("PropertiesTab.body")
+        Group {
+        if let layer = displayedLayer {
             VStack(spacing: 0) {
                 SectionDisclosure(title: "LAYER", defaultOpen: true) {
                     LayerBasics(layer: layer)
@@ -39,6 +46,11 @@ struct PropertiesTab: View {
             Text("Select a layer.")
                 .foregroundStyle(.secondary)
                 .padding()
+        }
+        }
+        .task(id: store.activeLayerID) {
+            await Task.yield()
+            displayedID = store.activeLayerID
         }
     }
 }

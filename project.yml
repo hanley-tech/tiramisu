@@ -9,6 +9,9 @@ packages:
   RichTextKit:
     url: https://github.com/danielsaidi/RichTextKit
     from: 1.0.0
+  StableDiffusion:
+    url: https://github.com/apple/ml-stable-diffusion
+    from: 1.0.0
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -61,12 +64,19 @@ targets:
               - ai.taiso.thumbz.project
             CFBundleTypeExtensions:
               - thumbz
+    # Sandbox is INTENTIONALLY DISABLED so the app can spawn the user-installed
+    # mflux-generate-fill subprocess for the Local FLUX-Fill backend (see
+    # LocalFluxFillService.swift). Sandbox would block executing arbitrary
+    # binaries at user paths AND would re-inherit on the subprocess, so mflux
+    # itself wouldn't be able to read its HF cache, model weights, or token.
+    # Tradeoff: this build is NOT eligible for Mac App Store distribution.
+    # Direct distribution via Developer ID + DMG/PKG is unaffected.
+    # If the FLUX-Fill backend is ever made an optional/opt-in flavor, the MAS
+    # build can re-enable sandbox and just hide that backend from Settings.
     entitlements:
       path: Thumbz/Resources/Thumbz.entitlements
       properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.files.user-selected.read-write: true
-        com.apple.security.files.bookmarks.app-scope: true
+        com.apple.security.network.client: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.taiso.Thumbz
@@ -74,6 +84,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - package: RichTextKit
+      - package: StableDiffusion
+        product: StableDiffusion
     postBuildScripts:
       - name: Install to ~/Applications (Debug only)
         script: |
@@ -83,3 +95,31 @@ targets:
         basedOnDependencyAnalysis: false
         runOnlyWhenInstalling: false
         shell: /bin/bash
+
+  ThumbzExpandTest:
+    type: tool
+    platform: macOS
+    sources:
+      - tools/expand_full
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.taiso.ThumbzExpandTest
+        ENABLE_HARDENED_RUNTIME: NO
+        SWIFT_STRICT_CONCURRENCY: minimal
+    dependencies:
+      - package: StableDiffusion
+        product: StableDiffusion
+
+  ThumbzInpaint9ChTest:
+    type: tool
+    platform: macOS
+    sources:
+      - tools/inpaint_9ch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.taiso.ThumbzInpaint9ChTest
+        ENABLE_HARDENED_RUNTIME: NO
+        SWIFT_STRICT_CONCURRENCY: minimal
+    dependencies:
+      - package: StableDiffusion
+        product: StableDiffusion

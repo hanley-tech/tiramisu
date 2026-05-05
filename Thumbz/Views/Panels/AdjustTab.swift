@@ -2,28 +2,39 @@ import SwiftUI
 
 struct AdjustTab: View {
     @Environment(DocumentStore.self) private var store
+    @State private var displayedID: UUID?
+    private var displayedLayer: PXLayer? {
+        store.layers.first(where: { $0.id == displayedID })
+    }
     var body: some View {
-        if let layer = store.activeLayer {
-            VStack(spacing: 0) {
-                SectionDisclosure(title: "LIGHTING", defaultOpen: true) {
-                    LightingPanel(layer: layer)
-                }
-                if layer.kind == .raster || layer.kind == .text {
-                    SectionDisclosure(title: "RELIGHT", defaultOpen: false) {
-                        RelightPanel(layer: layer)
+        let _ = perfMark("AdjustTab.body")
+        Group {
+            if let layer = displayedLayer {
+                VStack(spacing: 0) {
+                    SectionDisclosure(title: "LIGHTING", defaultOpen: true) {
+                        LightingPanel(layer: layer)
+                    }
+                    if layer.kind == .raster || layer.kind == .text {
+                        SectionDisclosure(title: "RELIGHT", defaultOpen: false) {
+                            RelightPanel(layer: layer)
+                        }
+                    }
+                    if layer.kind == .raster {
+                        SectionDisclosure(title: "SKIN RETOUCH", defaultOpen: false) {
+                            SkinPanel(layer: layer)
+                        }
+                    }
+                    SectionDisclosure(title: "FILTERS", defaultOpen: false) {
+                        FiltersPanel(layer: layer)
                     }
                 }
-                if layer.kind == .raster {
-                    SectionDisclosure(title: "SKIN RETOUCH", defaultOpen: false) {
-                        SkinPanel(layer: layer)
-                    }
-                }
-                SectionDisclosure(title: "FILTERS", defaultOpen: false) {
-                    FiltersPanel(layer: layer)
-                }
+            } else {
+                Text("Select a layer.").foregroundStyle(.secondary).padding()
             }
-        } else {
-            Text("Select a layer.").foregroundStyle(.secondary).padding()
+        }
+        .task(id: store.activeLayerID) {
+            await Task.yield()
+            displayedID = store.activeLayerID
         }
     }
 }
@@ -105,6 +116,7 @@ private struct RelightPanel: View {
 private struct SkinPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+    @State private var showMask: Bool = false
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Toggle("Enable Skin Retouch", isOn: $layer.skin.enabled).onChange(of: layer.skin.enabled) { store.invalidate() }
@@ -112,6 +124,13 @@ private struct SkinPanel: View {
             LabeledContent("Even Tone") { Slider(value: $layer.skin.evenTone, in: 0...1).onChange(of: layer.skin.evenTone) { store.invalidate() } }
             LabeledContent("De-age") { Slider(value: $layer.skin.deage, in: 0...1).onChange(of: layer.skin.deage) { store.invalidate() } }
             LabeledContent("Glow") { Slider(value: $layer.skin.glow, in: 0...1).onChange(of: layer.skin.glow) { store.invalidate() } }
+            Toggle("Debug: show face mask", isOn: $showMask)
+                .onChange(of: showMask) {
+                    SkinProcessor.debugShowMask = showMask
+                    store.invalidate()
+                }
+            Text("Toggle 'show face mask' to see what the algorithm thinks is skin (red overlay).")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

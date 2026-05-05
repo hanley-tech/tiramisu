@@ -23,6 +23,8 @@ final class DocumentStore {
     var showGoldenRatio: Bool = false
     var showYTCornerRadius: Bool = false
     var showYTDurationPill: Bool = false
+    var showYTBannerSafeAreas: Bool = false
+    var showPFPCircleMask: Bool = false
     var undoStack: [DocumentSnapshot] = []
     var redoStack: [DocumentSnapshot] = []
     var canUndo: Bool { !undoStack.isEmpty }

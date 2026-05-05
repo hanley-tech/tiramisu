@@ -9,6 +9,26 @@ protocol GenerativeFillService: Sendable {
               mask: CGImage,
               prompt: String,
               progress: @Sendable @escaping (String) -> Void) async throws -> CGImage
+
+    /// If non-nil, the coordinator should tile its input to this size in
+    /// Expand mode (one tile per band edge) instead of single-passing the
+    /// whole canvas. Used for backends that internally rescale to a fixed
+    /// resolution (e.g. Local SD-1.5 → 512×512), which destroys aspect
+    /// ratio and means the bands never get seen at native resolution.
+    var preferredInputSize: CGSize? { get }
+}
+
+extension GenerativeFillService {
+    var preferredInputSize: CGSize? { nil }
+}
+
+/// What the user is asking the fill engine to do. Drives mask shape,
+/// edge-padding, and per-backend strength.
+enum GenerativeFillMode: Int, Sendable {
+    case generate = 0   // fill marquee with prompted content
+    case replace = 1    // substitute marquee content
+    case remove = 2     // erase marquee, fill with surroundings
+    case expand = 3     // outpaint: extend image to canvas edges
 }
 
 enum GenerativeFillError: LocalizedError {
@@ -25,7 +45,7 @@ enum GenerativeFillError: LocalizedError {
         case .missingAPIKey: return "Replicate API key not set. Settings → Generative Fill."
         case .encodeFailed: return "Could not encode image / mask to PNG."
         case .createPredictionFailed(let s): return "Replicate API rejected the request: \(s)"
-        case .predictionFailed(let s): return "Replicate model failed: \(s)"
+        case .predictionFailed(let s): return s
         case .timeout: return "Replicate prediction timed out."
         case .downloadFailed: return "Could not download generated image."
         case .decodeFailed: return "Could not decode the generated image."
@@ -157,6 +177,9 @@ struct ReplicateFillService: GenerativeFillService {
 enum GenerativeFillSettings {
     private static let apiKeyKey = "ai.taiso.thumbz.replicate.apiKey"
     private static let modelKey = "ai.taiso.thumbz.replicate.model"
+    private static let backendKey = "ai.taiso.thumbz.fill.backend"
+
+    enum Backend: String { case replicate, localSD, localSD9ch, localFlux }
 
     static var apiKey: String {
         get { UserDefaults.standard.string(forKey: apiKeyKey) ?? "" }
@@ -166,5 +189,10 @@ enum GenerativeFillSettings {
     static var model: String {
         get { UserDefaults.standard.string(forKey: modelKey) ?? "black-forest-labs/flux-fill-dev" }
         set { UserDefaults.standard.set(newValue, forKey: modelKey) }
+    }
+
+    static var backend: Backend {
+        get { Backend(rawValue: UserDefaults.standard.string(forKey: backendKey) ?? "") ?? .replicate }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: backendKey) }
     }
 }

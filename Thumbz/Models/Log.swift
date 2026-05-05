@@ -77,3 +77,15 @@ final class LogConsole {
 func tlog(_ message: String) { Log.shared.log("info", message) }
 func twarn(_ message: String) { Log.shared.log("warn", message) }
 func terr(_ message: String) { Log.shared.log("error", message) }
+
+// Lightweight perf marker. Logs each call site with elapsed-since-last-call,
+// so consecutive perfMark calls reveal what work happens between them.
+private nonisolated(unsafe) var _perfLast: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
+@discardableResult
+func perfMark(_ label: String) -> Int {
+    let now = CFAbsoluteTimeGetCurrent()
+    let dt = (now - _perfLast) * 1000
+    _perfLast = now
+    Log.shared.log("info", "perf: \(label) Δ\(String(format: "%.1f", dt))ms")
+    return 0
+}

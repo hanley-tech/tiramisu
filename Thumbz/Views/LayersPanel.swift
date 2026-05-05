@@ -2,10 +2,9 @@ import SwiftUI
 
 struct LayersPanel: View {
     @Environment(DocumentStore.self) private var store
-    @State private var editingLayerID: UUID?
-    @State private var editingName: String = ""
 
     var body: some View {
+        @Bindable var store = store
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("LAYERS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -27,20 +26,18 @@ struct LayersPanel: View {
 
             List(selection: Binding(
                 get: { store.activeLayerID },
-                set: { id in store.activeLayerID = id }
+                set: { newID in
+                    let t0 = CFAbsoluteTimeGetCurrent()
+                    store.activeLayerID = newID
+                    DispatchQueue.main.async {
+                        let dt = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+                        tlog("perf: select set→nextRunloop \(String(format: "%.1f", dt))ms id=\(newID?.uuidString.prefix(8) ?? "nil")")
+                    }
+                }
             )) {
                 ForEach(Array(store.layers.reversed()), id: \.id) { layer in
-                    LayerRow(
-                        layer: layer,
-                        isEditing: editingLayerID == layer.id,
-                        draftName: $editingName,
-                        beginEdit: { startEditing(layer) },
-                        commitEdit: { commitEditing(layer) },
-                        cancelEdit: { editingLayerID = nil }
-                    )
-                    .tag(layer.id as UUID?)
-                    .listRowBackground(layer.id == store.activeLayerID
-                                       ? Color.accentColor.opacity(0.18) : Color.clear)
+                    LayerRow(layer: layer)
+                        .tag(layer.id as UUID?)
                 }
                 .onMove { indices, newOffset in
                     var displayed = Array(store.layers.reversed())
@@ -52,35 +49,23 @@ struct LayersPanel: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .onDeleteCommand {
+                guard store.activeLayerID != nil else { return }
+                store.removeActive()
+            }
         }
-    }
-
-    private func startEditing(_ layer: PXLayer) {
-        editingName = layer.name
-        editingLayerID = layer.id
-    }
-    private func commitEditing(_ layer: PXLayer) {
-        if !editingName.isEmpty && editingName != layer.name {
-            store.checkpoint("Rename Layer")
-            layer.name = editingName
-        }
-        editingLayerID = nil
     }
 }
 
 struct LayerRow: View {
     @Environment(DocumentStore.self) private var store
     let layer: PXLayer
-    let isEditing: Bool
-    @Binding var draftName: String
-    let beginEdit: () -> Void
-    let commitEdit: () -> Void
-    let cancelEdit: () -> Void
+    @State private var isEditing: Bool = false
+    @State private var draftName: String = ""
     @FocusState private var nameFocused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            // Drag handle — always visible, easy to grab for reorder.
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.secondary)
                 .font(.system(size: 10))
@@ -98,6 +83,8 @@ struct LayerRow: View {
             LayerThumbnail(layer: layer)
                 .frame(width: 36, height: 22)
                 .cornerRadius(3)
+                .contentShape(Rectangle())
+                .onTapGesture { store.activeLayerID = layer.id }
 
             Group {
                 if isEditing {
@@ -106,16 +93,17 @@ struct LayerRow: View {
                         .font(.system(size: 12))
                         .focused($nameFocused)
                         .onSubmit { commitEdit() }
-                        .onExitCommand { cancelEdit() }
-                        .onChange(of: isEditing) { _, editing in
-                            if editing { nameFocused = true }
-                        }
+                        .onExitCommand { isEditing = false }
                         .task { nameFocused = true }
                 } else {
                     Text(layer.name)
                         .font(.system(size: 12))
                         .lineLimit(1)
+                        .contentShape(Rectangle())
+                        // Order matters: register double-tap FIRST so SwiftUI
+                        // disambiguates. Single tap selects, double tap renames.
                         .onTapGesture(count: 2) { beginEdit() }
+                        .onTapGesture(count: 1) { store.activeLayerID = layer.id }
                 }
             }
 
@@ -144,6 +132,18 @@ struct LayerRow: View {
                 store.removeActive()
             }.keyboardShortcut(.delete, modifiers: [.command])
         }
+    }
+
+    private func beginEdit() {
+        draftName = layer.name
+        isEditing = true
+    }
+    private func commitEdit() {
+        if !draftName.isEmpty && draftName != layer.name {
+            store.checkpoint("Rename Layer")
+            layer.name = draftName
+        }
+        isEditing = false
     }
 
     private var kindBadge: String {
