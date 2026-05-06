@@ -59,6 +59,22 @@ struct AppCommands: Commands {
             Button("Delete Layer") { store.removeActive() }
                 .keyboardShortcut(.delete, modifiers: [.command])
             Divider()
+            Menu("Arrange") {
+                Button("Fit to Canvas")  { LayerArrange.fitToCanvas(store) }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                Button("Fill Canvas")    { LayerArrange.fillCanvas(store) }
+                    .keyboardShortcut("f", modifiers: [.command, .option, .shift])
+                Button("Reset Scale (100%)") { LayerArrange.resetScale(store) }
+                    .keyboardShortcut("0", modifiers: [.command, .option])
+                Divider()
+                Button("Center on Canvas") { LayerArrange.align(store, to: .center) }
+                Divider()
+                Button("Align Left")   { LayerArrange.align(store, to: .middleLeft) }
+                Button("Align Right")  { LayerArrange.align(store, to: .middleRight) }
+                Button("Align Top")    { LayerArrange.align(store, to: .topCenter) }
+                Button("Align Bottom") { LayerArrange.align(store, to: .bottomCenter) }
+            }
+            Divider()
             Button("Remove Background (AI)") { Task { await removeBackground() } }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
         }
@@ -77,15 +93,15 @@ struct AppCommands: Commands {
     private func openDocument() {
         if !confirmDiscardChangesIfNeeded() { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [thumbzType, .json]
-        panel.allowedFileTypes = ["thumbz", "json"]   // belt & suspenders for older selectors
+        panel.allowedContentTypes = [tiramisuType, .json]
+        panel.allowedFileTypes = ["tiramisu", "json"]   // belt & suspenders for older selectors
         panel.allowsOtherFileTypes = true
         panel.treatsFilePackagesAsDirectories = false
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.title = "Open Thumbz Project"
-        panel.message = "Choose a .thumbz project file"
+        panel.title = "Open Tiramisu Project"
+        panel.message = "Choose a .tiramisu project file"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         FileBookmarks.store(for: url)
         openFile(url: url)
@@ -137,8 +153,8 @@ struct AppCommands: Commands {
 
     private func saveAs() {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [thumbzType]
-        panel.nameFieldStringValue = store.currentFileURL?.deletingPathExtension().lastPathComponent ?? "Untitled.thumbz"
+        panel.allowedContentTypes = [tiramisuType]
+        panel.nameFieldStringValue = store.currentFileURL?.deletingPathExtension().lastPathComponent ?? "Untitled.tiramisu"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         FileBookmarks.store(for: url)
         writeProject(to: url)
@@ -320,12 +336,12 @@ struct AppCommands: Commands {
     }
 }
 
-// UTI for Thumbz project files — declared in Info.plist (UTExportedTypeDeclarations
+// UTI for Tiramisu project files — declared in Info.plist (UTExportedTypeDeclarations
 // + CFBundleDocumentTypes). We fetch it here; `exportedAs:` is a no-op if already
 // registered by the bundle, and provides a fallback if it isn't.
-let thumbzType: UTType = {
-    if let t = UTType("ai.taiso.thumbz.project") { return t }
-    return UTType(exportedAs: "ai.taiso.thumbz.project", conformingTo: .json)
+let tiramisuType: UTType = {
+    if let t = UTType("world.hanley.tiramisu.project") { return t }
+    return UTType(exportedAs: "world.hanley.tiramisu.project", conformingTo: .json)
 }()
 
 // MARK: - Debug menu
@@ -345,7 +361,7 @@ struct DebugCommands: Commands {
                 if ControlServer.shared.isRunning {
                     ControlServer.shared.stop()
                 } else {
-                    if let store = ThumbzAppDelegate.shared.liveStore {
+                    if let store = TiramisuAppDelegate.shared.liveStore {
                         ControlServer.shared.start(on: 7878, store: store)
                     }
                 }

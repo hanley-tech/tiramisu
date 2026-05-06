@@ -28,12 +28,9 @@ enum GenerativeFillCoordinator {
         let context: CGImage
         let mask: CGImage
         if mode == .expand {
-            // For mask-aware backends (FLUX-Fill, Replicate) the diffusion-
-            // gradient prep is counterproductive — those models figure out
-            // band content from the mask alone, and our pre-filled gradient
-            // biases them toward "extend this dark/light gradient." Only feed
-            // the prep to backends with a fixed input size (= local SD i2i +
-            // 9ch which need a non-trivial conditioning image).
+            // FLUX-Fill and Replicate are mask-aware — they figure out band
+            // content from the mask alone, no prep fill required. Only legacy
+            // fixed-input-size backends need a pre-filled conditioning image.
             let needsPrepFill = service.preferredInputSize != nil
             if needsPrepFill {
                 let prepared = try buildExpandInput(store: store, layer: activeLayer)
@@ -496,7 +493,7 @@ enum GenerativeFillCoordinator {
     private static func dumpDebugImage(_ image: CGImage, name: String) {
         guard let data = LayerSnapshot.encodePNG(image) else { return }
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("thumbz-\(name).png")
+            .appendingPathComponent("tiramisu-\(name).png")
         try? data.write(to: url)
         tlog("dump: \(name) → \(url.path) (\(image.width)x\(image.height), \(data.count) bytes)")
     }

@@ -32,7 +32,7 @@ final class DocumentStore {
     private let maxHistory = 50
     private var coalescingName: String? = nil    // when set, consecutive checkpoints with this name fold into the previous one
     private var watchers: [UUID: FileWatcher] = [:]
-    private let recentsKey = "ai.taiso.Thumbz.recentFiles"
+    private let recentsKey = "world.hanley.tiramisu.recentFiles"
     private let recentsMax = 10
     // Debug / test harness server. Enabled by default in Debug builds; can be
     // toggled at runtime from Debug → Control Server.
@@ -219,7 +219,7 @@ final class DocumentStore {
             return
         }
         guard let bytes = smart.sourceBytes else { return }
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Thumbz-Smart", isDirectory: true)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Tiramisu-Smart", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("\(layer.id.uuidString).\(smart.sourceFormat)")
         try? bytes.write(to: url, options: .atomic)

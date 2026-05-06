@@ -2,12 +2,12 @@ import SwiftUI
 import AppKit
 
 @main
-struct ThumbzApp: App {
+struct TiramisuApp: App {
     @State private var store = DocumentStore()
-    @NSApplicationDelegateAdaptor(ThumbzAppDelegate.self) private var appDelegate
+    @NSApplicationDelegateAdaptor(TiramisuAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Thumbz") {
+        WindowGroup("Tiramisu") {
             MainWindow()
                 .environment(store)
                 .frame(minWidth: 1280, minHeight: 800)
@@ -18,7 +18,7 @@ struct ThumbzApp: App {
                     }
                 }
                 .onOpenURL { url in
-                    ThumbzApp.loadFile(url: url, into: store)
+                    TiramisuApp.loadFile(url: url, into: store)
                 }
         }
         .windowStyle(.titleBar)
@@ -38,7 +38,7 @@ struct ThumbzApp: App {
     static func loadFile(url: URL, into store: DocumentStore) {
         let ext = url.pathExtension.lowercased()
         let target = FileBookmarks.resolve(path: url.path) ?? url
-        if ext == "thumbz" || ext == "json" {
+        if ext == "tiramisu" || ext == "json" {
             do {
                 let data = try FileBookmarks.withScope(target) { try Data(contentsOf: $0) }
                 let snap = try JSONDecoder().decode(DocumentSnapshot.self, from: data)
@@ -64,8 +64,8 @@ struct ThumbzApp: App {
 }
 
 @MainActor
-final class ThumbzAppDelegate: NSObject, NSApplicationDelegate {
-    static let shared = ThumbzAppDelegate()
+final class TiramisuAppDelegate: NSObject, NSApplicationDelegate {
+    static let shared = TiramisuAppDelegate()
     private weak var store: DocumentStore?
     var liveStore: DocumentStore? { store }
     private var pending: [URL] = []
@@ -74,7 +74,7 @@ final class ThumbzAppDelegate: NSObject, NSApplicationDelegate {
         self.store = store
         let buffered = pending
         pending.removeAll()
-        for u in buffered { ThumbzApp.loadFile(url: u, into: store) }
+        for u in buffered { TiramisuApp.loadFile(url: u, into: store) }
     }
 
     nonisolated func application(_ application: NSApplication, open urls: [URL]) {
@@ -82,7 +82,7 @@ final class ThumbzAppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             if let store = self.store {
-                for u in urls { ThumbzApp.loadFile(url: u, into: store) }
+                for u in urls { TiramisuApp.loadFile(url: u, into: store) }
             } else {
                 self.pending.append(contentsOf: urls)
             }

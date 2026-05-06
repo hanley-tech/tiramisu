@@ -1,6 +1,6 @@
-name: Thumbz
+name: Tiramisu
 options:
-  bundleIdPrefix: ai.taiso
+  bundleIdPrefix: world.hanley
   deploymentTarget:
     macOS: "26.0"
   xcodeVersion: "17.0"
@@ -8,9 +8,6 @@ options:
 packages:
   RichTextKit:
     url: https://github.com/danielsaidi/RichTextKit
-    from: 1.0.0
-  StableDiffusion:
-    url: https://github.com/apple/ml-stable-diffusion
     from: 1.0.0
 settings:
   base:
@@ -22,48 +19,48 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     DEAD_CODE_STRIPPING: YES
 targets:
-  Thumbz:
+  Tiramisu:
     type: application
     platform: macOS
     sources:
-      - path: Thumbz
+      - path: Tiramisu
         excludes:
           - "Resources/Info.plist"
     resources:
-      - Thumbz/Resources/Assets.xcassets
+      - Tiramisu/Resources/Assets.xcassets
     info:
-      path: Thumbz/Resources/Info.plist
+      path: Tiramisu/Resources/Info.plist
       properties:
-        CFBundleName: Thumbz
-        CFBundleDisplayName: Thumbz
+        CFBundleName: Tiramisu
+        CFBundleDisplayName: Tiramisu
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "26.0"
         LSApplicationCategoryType: public.app-category.graphics-design
-        NSHumanReadableCopyright: "© 2026 Taiso"
-        NSCameraUsageDescription: "Thumbz never uses the camera directly."
+        NSHumanReadableCopyright: "© 2026 Hanley Leung"
+        NSCameraUsageDescription: "Tiramisu never uses the camera directly."
         NSPhotoLibraryUsageDescription: "Import photos as layers to compose thumbnails."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: ai.taiso.thumbz.project
-            UTTypeDescription: Thumbz Project
+          - UTTypeIdentifier: world.hanley.tiramisu.project
+            UTTypeDescription: Tiramisu Project
             UTTypeConformsTo:
               - public.json
               - public.data
             UTTypeTagSpecification:
               public.filename-extension:
-                - thumbz
+                - tiramisu
               public.mime-type:
-                - application/x-thumbz+json
+                - application/x-tiramisu+json
         CFBundleDocumentTypes:
-          - CFBundleTypeName: Thumbz Project
+          - CFBundleTypeName: Tiramisu Project
             CFBundleTypeRole: Editor
             LSHandlerRank: Owner
             LSItemContentTypes:
-              - ai.taiso.thumbz.project
+              - world.hanley.tiramisu.project
             CFBundleTypeExtensions:
-              - thumbz
+              - tiramisu
     # Sandbox is INTENTIONALLY DISABLED so the app can spawn the user-installed
     # mflux-generate-fill subprocess for the Local FLUX-Fill backend (see
     # LocalFluxFillService.swift). Sandbox would block executing arbitrary
@@ -74,18 +71,16 @@ targets:
     # If the FLUX-Fill backend is ever made an optional/opt-in flavor, the MAS
     # build can re-enable sandbox and just hide that backend from Settings.
     entitlements:
-      path: Thumbz/Resources/Thumbz.entitlements
+      path: Tiramisu/Resources/Tiramisu.entitlements
       properties:
         com.apple.security.network.client: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.taiso.Thumbz
+        PRODUCT_BUNDLE_IDENTIFIER: world.hanley.tiramisu
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - package: RichTextKit
-      - package: StableDiffusion
-        product: StableDiffusion
     postBuildScripts:
       - name: Install to ~/Applications (Debug only)
         script: |
@@ -96,30 +91,3 @@ targets:
         runOnlyWhenInstalling: false
         shell: /bin/bash
 
-  ThumbzExpandTest:
-    type: tool
-    platform: macOS
-    sources:
-      - tools/expand_full
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.taiso.ThumbzExpandTest
-        ENABLE_HARDENED_RUNTIME: NO
-        SWIFT_STRICT_CONCURRENCY: minimal
-    dependencies:
-      - package: StableDiffusion
-        product: StableDiffusion
-
-  ThumbzInpaint9ChTest:
-    type: tool
-    platform: macOS
-    sources:
-      - tools/inpaint_9ch
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.taiso.ThumbzInpaint9ChTest
-        ENABLE_HARDENED_RUNTIME: NO
-        SWIFT_STRICT_CONCURRENCY: minimal
-    dependencies:
-      - package: StableDiffusion
-        product: StableDiffusion

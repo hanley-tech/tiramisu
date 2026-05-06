@@ -175,11 +175,11 @@ struct ReplicateFillService: GenerativeFillService {
 
 /// Where the API key is stored. UserDefaults for MVP — Keychain upgrade later.
 enum GenerativeFillSettings {
-    private static let apiKeyKey = "ai.taiso.thumbz.replicate.apiKey"
-    private static let modelKey = "ai.taiso.thumbz.replicate.model"
-    private static let backendKey = "ai.taiso.thumbz.fill.backend"
+    private static let apiKeyKey = "world.hanley.tiramisu.replicate.apiKey"
+    private static let modelKey = "world.hanley.tiramisu.replicate.model"
+    private static let backendKey = "world.hanley.tiramisu.fill.backend"
 
-    enum Backend: String { case replicate, localSD, localSD9ch, localFlux }
+    enum Backend: String { case replicate, localFlux }
 
     static var apiKey: String {
         get { UserDefaults.standard.string(forKey: apiKeyKey) ?? "" }

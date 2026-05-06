@@ -12,9 +12,11 @@ struct PropertiesTab: View {
 
     var body: some View {
         let _ = perfMark("PropertiesTab.body")
-        Group {
-        if let layer = displayedLayer {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
+            SectionDisclosure(title: "DOCUMENT", defaultOpen: true) {
+                DocumentPanel()
+            }
+            if let layer = displayedLayer {
                 SectionDisclosure(title: "LAYER", defaultOpen: true) {
                     LayerBasics(layer: layer)
                 }
@@ -41,17 +43,67 @@ struct PropertiesTab: View {
                         CutoutPanel(layer: layer)
                     }
                 }
+            } else {
+                Text("Select a layer to see its properties.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding()
             }
-        } else {
-            Text("Select a layer.")
-                .foregroundStyle(.secondary)
-                .padding()
-        }
         }
         .task(id: store.activeLayerID) {
             await Task.yield()
             displayedID = store.activeLayerID
         }
+    }
+}
+
+private struct DocumentPanel: View {
+    @Environment(DocumentStore.self) private var store
+    @State private var widthText: String = ""
+    @State private var heightText: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("Size") {
+                HStack(spacing: 4) {
+                    TextField("W", text: $widthText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 64)
+                        .onSubmit { commitSize() }
+                    Text("×").foregroundStyle(.secondary)
+                    TextField("H", text: $heightText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 64)
+                        .onSubmit { commitSize() }
+                    Text("px").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            LabeledContent("Background") {
+                ColorPicker("", selection: Binding(
+                    get: { store.backgroundColor.swiftUIColor },
+                    set: { store.backgroundColor = ColorRGB($0.asNSColor); store.invalidate() }
+                ))
+                .labelsHidden()
+                .help("Canvas background — shows behind all layers and through transparent areas")
+            }
+        }
+        .onAppear { syncFromStore() }
+        .onChange(of: store.canvasSize) { _, _ in syncFromStore() }
+    }
+
+    private func syncFromStore() {
+        widthText = String(Int(store.canvasSize.width))
+        heightText = String(Int(store.canvasSize.height))
+    }
+
+    private func commitSize() {
+        guard let w = Int(widthText), let h = Int(heightText), w > 0, h > 0 else {
+            syncFromStore()
+            return
+        }
+        store.checkpoint("Resize Canvas")
+        store.canvasSize = CGSize(width: w, height: h)
+        store.invalidate()
     }
 }
 
@@ -210,7 +262,9 @@ private struct TextEditorPanel: View {
                 ColorPicker("", selection: Binding(
                     get: { layer.text.color.swiftUIColor },
                     set: { layer.text.color = ColorRGB($0.asNSColor); store.invalidate() }
-                )).labelsHidden()
+                ))
+                .labelsHidden()
+                .help("Default color for this text layer — overridden by per-character colors set inline")
             }
             LabeledContent("Align") {
                 Picker("", selection: $layer.text.alignment) {
@@ -520,7 +574,9 @@ private struct SolidEditorPanel: View {
                 ColorPicker("", selection: Binding(
                     get: { layer.solid.color.swiftUIColor },
                     set: { layer.solid.color = ColorRGB($0.asNSColor); store.invalidate() }
-                )).labelsHidden()
+                ))
+                .labelsHidden()
+                .help("Fill color for this Solid Color layer")
             }
             Text("Tip: set layer Blend (in LAYER) to Multiply for a vignette or Screen for a warm color cast.")
                 .font(.caption).foregroundStyle(.secondary)

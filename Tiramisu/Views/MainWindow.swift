@@ -5,21 +5,27 @@ struct MainWindow: View {
     @AppStorage("ui.inspector.visible") private var showingInspector: Bool = true
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             ToolSidebar()
-                .navigationSplitViewColumnWidth(min: 60, ideal: 64, max: 72)
-        } detail: {
-            ZStack {
-                Color(nsColor: .underPageBackgroundColor).ignoresSafeArea()
-                CanvasView()
-                    .padding(24)
+                .frame(width: 64)
+                .frame(maxHeight: .infinity)
+                .background(.bar)
+            Divider()
+            VStack(spacing: 0) {
+                ToolOptionsBar()
+                Divider()
+                ZStack {
+                    Color(nsColor: .underPageBackgroundColor).ignoresSafeArea()
+                    CanvasView()
+                        .padding(24)
+                }
             }
-            .toolbar { CanvasToolbar(store: store) }
             .inspector(isPresented: $showingInspector) {
                 InspectorView()
                     .inspectorColumnWidth(min: 300, ideal: 340, max: 420)
             }
         }
+        .toolbar { CanvasToolbar(store: store) }
         .navigationTitle(titleText)
         .navigationSubtitle("\(Int(store.canvasSize.width)) × \(Int(store.canvasSize.height))")
     }
@@ -54,13 +60,6 @@ private struct CanvasToolbar: ToolbarContent {
                 Label("Canvas \(Int(store.canvasSize.width))×\(Int(store.canvasSize.height))",
                       systemImage: "rectangle.dashed")
             }
-
-            ColorPicker("", selection: Binding(
-                get: { store.backgroundColor.swiftUIColor },
-                set: { store.backgroundColor = ColorRGB($0.asNSColor); store.invalidate() }
-            ))
-            .labelsHidden()
-            .help("Background color")
 
             Menu {
                 Toggle("Rule of Thirds", isOn: $store.showRuleOfThirds)

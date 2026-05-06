@@ -2,14 +2,14 @@ import Foundation
 import Observation
 import AppKit
 
-/// Ship-grade logger: writes to `~/Library/Logs/Thumbz/Thumbz.log` and mirrors to an
+/// Ship-grade logger: writes to `~/Library/Logs/Tiramisu/Tiramisu.log` and mirrors to an
 /// in-app console (LogConsole). Call `tlog("…")` from anywhere.
 final class Log: @unchecked Sendable {
     static let shared = Log()
     @MainActor static let console = LogConsole()
 
     let fileURL: URL
-    private let queue = DispatchQueue(label: "ai.taiso.thumbz.log")
+    private let queue = DispatchQueue(label: "world.hanley.tiramisu.log")
     private static let fmt: @Sendable () -> ISO8601DateFormatter = {
         // ISO8601DateFormatter is thread-safe per Apple docs but not typed Sendable.
         // Keep a per-thread instance to sidestep the Swift 6 complaint.
@@ -22,9 +22,9 @@ final class Log: @unchecked Sendable {
 
     private init() {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!
-        let dir = base.appendingPathComponent("Logs/Thumbz", isDirectory: true)
+        let dir = base.appendingPathComponent("Logs/Tiramisu", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        fileURL = dir.appendingPathComponent("Thumbz.log")
+        fileURL = dir.appendingPathComponent("Tiramisu.log")
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         }

@@ -51,55 +51,25 @@ enum GenerativeFillUI {
             if prompt.isEmpty { prompt = "seamless continuation of the existing photo, matching texture, color and lighting, photorealistic" }
         default: break
         }
+
         let service: GenerativeFillService
-        // For Expand mode, auto-upgrade the i2i local backend to the best
-        // installed local mask-aware option. Order: localFlux > localSD9ch > localSD.
-        // Don't override if user explicitly picked Replicate.
-        let preferred: GenerativeFillSettings.Backend = {
-            let chosen = GenerativeFillSettings.backend
-            if mode == .expand && chosen == .localSD {
-                if LocalFluxFillService.isInstalled { return .localFlux }
-                if LocalSDInpaint9ChService.isModelInstalled { return .localSD9ch }
-            }
-            return chosen
-        }()
-        switch preferred {
+        switch GenerativeFillSettings.backend {
         case .localFlux:
             guard LocalFluxFillService.isInstalled else {
                 let a = NSAlert()
                 a.messageText = "Local FLUX-Fill not installed"
                 a.informativeText = LocalFluxFillService.setupInstructions
-                a.runModal()
+                a.addButton(withTitle: "Switch to Replicate (cloud)")
+                a.addButton(withTitle: "Cancel")
+                if a.runModal() == .alertFirstButtonReturn {
+                    GenerativeFillSettings.backend = .replicate
+                    presentSettings()
+                }
                 return
             }
-            // Default: use T9 cache if it exists (where we initially downloaded
-            // the weights), otherwise let the user's HF_HOME env var win.
-            let t9Cache = URL(fileURLWithPath: "/Volumes/T9/.huggingface")
-            let cacheOverride = FileManager.default.fileExists(atPath: t9Cache.path) ? t9Cache : nil
-            service = LocalFluxFillService(modelHFCacheDir: cacheOverride)
-        case .localSD9ch:
-            guard LocalSDInpaint9ChService.isModelInstalled else {
-                let a = NSAlert()
-                a.messageText = "Local SD inpainting model not installed"
-                a.informativeText = "AI → Generative Fill Settings → Install 9ch Inpaint Model. ~2.6 GB download."
-                a.runModal()
-                return
-            }
-            service = LocalSDInpaint9ChService()
-        case .localSD:
-            guard LocalSDInpaintService.isModelInstalled else {
-                let a = NSAlert()
-                a.messageText = "Local SD model not installed"
-                a.informativeText = "AI → Generative Fill Settings → Install Local Model. ~1.6 GB download."
-                a.runModal()
-                return
-            }
-            // Expand pre-fills bands with iteratively-diffused color from the
-            // layer's edges. Lower strength preserves that smooth gradient
-            // while letting the model add fine texture to break up flatness.
-            let strength: Float = (mode == .expand) ? 0.55 : 0.85
-            service = LocalSDInpaintService(modelDirectory: LocalSDInpaintService.defaultModelDirectory,
-                                            strength: strength)
+            // No cache override — let the subprocess inherit the user's HF_HOME
+            // env var, or fall back to the default (~/.cache/huggingface).
+            service = LocalFluxFillService(modelHFCacheDir: nil)
         case .replicate:
             if GenerativeFillSettings.apiKey.isEmpty {
                 presentSettings()
@@ -108,6 +78,7 @@ enum GenerativeFillUI {
             service = ReplicateFillService(apiKey: GenerativeFillSettings.apiKey,
                                             modelVersion: GenerativeFillSettings.model)
         }
+
         let win = ProgressWindow.show(title: "Generative Fill", detail: "Starting…")
         win.setIndeterminate(true)
         Task { @MainActor in
@@ -145,41 +116,27 @@ enum GenerativeFillUI {
     static func presentSettings() {
         let alert = NSAlert()
         alert.messageText = "Generative Fill Settings"
-        let installed = LocalSDInpaintService.isModelInstalled
-        let version = LocalSDInstaller.installedModelVersion
-        let installedVersion = LocalSDInpaintService.installedVersion
-        let sizeMB = installed ? Int(LocalSDInpaintService.installedSizeMB()) : 0
-        let isUpToDate = installed && installedVersion == version
-        let status: String = {
-            if !installed { return "not installed" }
-            if isUpToDate { return "installed ✓ (v\(installedVersion ?? "?"), \(sizeMB) MB)" }
-            return "installed but outdated (v\(installedVersion ?? "unknown"), expected v\(version))"
-        }()
-        alert.informativeText = "Local SD model: \(status)"
+        alert.informativeText = "Pick a backend. Replicate runs in the cloud; Local FLUX-Fill runs on your Mac via mflux."
 
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 420, height: 200))
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 420, height: 180))
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
 
-        // Backend picker
+        // Backend picker — two options only
         let backendLabel = NSTextField(labelWithString: "Backend")
         let backendPopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
         backendPopup.addItem(withTitle: "Replicate (cloud, FLUX-Fill, top quality)")
-        backendPopup.addItem(withTitle: "Local SD-1.5 i2i (offline, ~1.6 GB, has seam)")
-        backendPopup.addItem(withTitle: "Local SD-1.5 9ch Inpaint (offline, ~2.6 GB, mask-aware ✓)")
         let fluxLabel: String = {
             if LocalFluxFillService.isInstalled {
-                return "Local FLUX-Fill (offline, mflux ✓ detected, ~30 GB weights — best local quality)"
+                return "Local FLUX-Fill (offline, mflux ✓ detected — best local quality)"
             }
             return "Local FLUX-Fill (offline, mflux NOT installed — see Help)"
         }()
         backendPopup.addItem(withTitle: fluxLabel)
         switch GenerativeFillSettings.backend {
-        case .replicate:    backendPopup.selectItem(at: 0)
-        case .localSD:      backendPopup.selectItem(at: 1)
-        case .localSD9ch:   backendPopup.selectItem(at: 2)
-        case .localFlux:    backendPopup.selectItem(at: 3)
+        case .replicate: backendPopup.selectItem(at: 0)
+        case .localFlux: backendPopup.selectItem(at: 1)
         }
         stack.addArrangedSubview(backendLabel)
         stack.addArrangedSubview(backendPopup)
@@ -196,107 +153,19 @@ enum GenerativeFillUI {
         stack.addArrangedSubview(modelLabel)
         stack.addArrangedSubview(modelField)
 
-        stack.frame.size = NSSize(width: 420, height: 220)
+        stack.frame.size = NSSize(width: 420, height: 200)
         alert.accessoryView = stack
         alert.addButton(withTitle: "Save")
-        let installButtonTitle: String = {
-            if !installed { return "Install Local Model…" }
-            if isUpToDate { return "Reinstall Local Model" }
-            return "Update Local Model"
-        }()
-        alert.addButton(withTitle: installButtonTitle)
-        if installed {
-            alert.addButton(withTitle: "Delete Local Model")
-        }
         alert.addButton(withTitle: "Cancel")
 
-        let response = alert.runModal()
-        switch response {
-        case .alertFirstButtonReturn:
+        if alert.runModal() == .alertFirstButtonReturn {
             switch backendPopup.indexOfSelectedItem {
             case 0: GenerativeFillSettings.backend = .replicate
-            case 1: GenerativeFillSettings.backend = .localSD
-            case 2: GenerativeFillSettings.backend = .localSD9ch
-            case 3: GenerativeFillSettings.backend = .localFlux
+            case 1: GenerativeFillSettings.backend = .localFlux
             default: break
             }
             GenerativeFillSettings.apiKey = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             GenerativeFillSettings.model = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .alertSecondButtonReturn:
-            installLocalModel()
-        case .alertThirdButtonReturn where installed:
-            deleteLocalModel()
-        default: break
-        }
-    }
-
-    private static func deleteLocalModel() {
-        let confirm = NSAlert()
-        confirm.messageText = "Delete Local SD Model?"
-        confirm.informativeText = "This frees ~\(Int(LocalSDInpaintService.installedSizeMB())) MB. You'll need to reinstall to use the local backend."
-        confirm.addButton(withTitle: "Delete")
-        confirm.addButton(withTitle: "Cancel")
-        confirm.alertStyle = .warning
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
-        do {
-            try LocalSDInpaintService.uninstall()
-            tlog("Local SD model deleted")
-            // Switch backend back to replicate so Generative Fill keeps working.
-            if GenerativeFillSettings.backend == .localSD {
-                GenerativeFillSettings.backend = .replicate
-            }
-            let done = NSAlert()
-            done.messageText = "Local SD model deleted."
-            done.runModal()
-        } catch {
-            let a = NSAlert()
-            a.messageText = "Delete failed"
-            a.informativeText = error.localizedDescription
-            a.alertStyle = .warning
-            a.runModal()
-        }
-    }
-
-    private static func installLocalModel() {
-        var force = false
-        if LocalSDInpaintService.isModelInstalled {
-            let isUpToDate = LocalSDInpaintService.installedVersion == LocalSDInstaller.installedModelVersion
-            if isUpToDate {
-                let confirm = NSAlert()
-                confirm.messageText = "Local SD model is already up to date."
-                confirm.informativeText = "v\(LocalSDInstaller.installedModelVersion). Reinstall anyway? This will re-download ~1.7 GB."
-                confirm.addButton(withTitle: "Reinstall")
-                confirm.addButton(withTitle: "Cancel")
-                confirm.alertStyle = .informational
-                guard confirm.runModal() == .alertFirstButtonReturn else { return }
-                force = true
-            }
-            // If outdated, just update — no need to ask.
-        }
-        let win = ProgressWindow.show(title: "Installing Local SD Model",
-                                      detail: "Preparing…")
-        Task { @MainActor in
-            do {
-                try await LocalSDInstaller.install(force: force) { msg, pct in
-                    let m = msg, p = pct
-                    Task { @MainActor in
-                        // Throttle log spam — only log when phase changes meaningfully.
-                        win.update(detail: m, fraction: p)
-                    }
-                }
-                win.close()
-                let done = NSAlert()
-                done.messageText = "Local SD model installed"
-                done.informativeText = "AI → Generative Fill (⌘⇧G) will now run locally on the Neural Engine."
-                done.runModal()
-            } catch {
-                win.close()
-                let a = NSAlert()
-                a.messageText = "Install failed"
-                a.informativeText = error.localizedDescription
-                a.alertStyle = .warning
-                a.runModal()
-            }
         }
     }
 }

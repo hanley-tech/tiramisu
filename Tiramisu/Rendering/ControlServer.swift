@@ -23,8 +23,8 @@ import AppKit
 ///         - "moveLayer"     { "id":"...", "x":0,"y":0 }               // absolute offset
 ///         - "setCanvas"     { "width": 1920, "height": 1080 }
 ///         - "setBackground" { "hex": "0d1220" }
-///         - "savePath"      { "path": "/tmp/test.thumbz" }
-///         - "loadPath"      { "path": "/tmp/test.thumbz" }
+///         - "savePath"      { "path": "/tmp/test.tiramisu" }
+///         - "loadPath"      { "path": "/tmp/test.tiramisu" }
 ///         - "exportPNG"     { "path": "/tmp/out.png" }
 @MainActor
 final class ControlServer {
@@ -90,7 +90,7 @@ final class ControlServer {
         case ("GET", "/state"):         return handleState()
         case ("GET", "/canvas.png"):    return handleCanvasPNG()
         case ("GET", "/log/tail"):      return handleLogTail()
-        case ("GET", "/"):              return httpResponse(status: 200, body: "Thumbz Control Server. See /state, /canvas.png, /action")
+        case ("GET", "/"):              return httpResponse(status: 200, body: "Tiramisu Control Server. See /state, /canvas.png, /action")
         case ("POST", "/action"):       return handleAction(request: request)
         default:
             return httpResponse(status: 404, body: "Not found: \(method) \(path)")
@@ -237,16 +237,25 @@ final class ControlServer {
             }
             return httpResponse(status: 400, body: "Missing 'path'")
         case "runExpand":
-            // Run the Expand pipeline against the current store. Synchronous from the
-            // caller's perspective: blocks the HTTP response until the pipeline finishes.
-            // Returns the paths of all dump files generated under the sandbox tmp.
+            // Run the Expand pipeline against the current store using the active
+            // generative-fill backend (Replicate or Local FLUX-Fill). Synchronous from
+            // the caller's perspective: blocks the HTTP response until done.
             let prompt = (obj["prompt"] as? String) ?? "seamless continuation of the existing photo, matching texture, color and lighting, photorealistic"
-            let strength = (obj["strength"] as? Double).map(Float.init) ?? 0.95
-            guard LocalSDInpaintService.isModelInstalled else {
-                return httpResponse(status: 412, body: "Local SD model not installed")
+            let service: GenerativeFillService
+            switch GenerativeFillSettings.backend {
+            case .localFlux:
+                guard LocalFluxFillService.isInstalled else {
+                    return httpResponse(status: 412, body: "Local FLUX-Fill not installed (mflux missing)")
+                }
+                // No cache override — let the user's HF_HOME env var win, or default.
+                service = LocalFluxFillService(modelHFCacheDir: nil)
+            case .replicate:
+                if GenerativeFillSettings.apiKey.isEmpty {
+                    return httpResponse(status: 412, body: "Replicate API key not configured")
+                }
+                service = ReplicateFillService(apiKey: GenerativeFillSettings.apiKey,
+                                                modelVersion: GenerativeFillSettings.model)
             }
-            let service = LocalSDInpaintService(modelDirectory: LocalSDInpaintService.defaultModelDirectory,
-                                                 strength: strength)
             let group = DispatchGroup()
             group.enter()
             var threwError: String?
@@ -258,16 +267,11 @@ final class ControlServer {
                 }
                 group.leave()
             }
-            // Synchronously wait. ControlServer runs off the main queue, so this is OK.
             group.wait()
             if let threwError {
                 return httpResponse(status: 500, body: "Expand failed: \(threwError)")
             }
-            let tmp = NSTemporaryDirectory()
-            let dumps = (try? FileManager.default.contentsOfDirectory(atPath: tmp)
-                .filter { $0.hasPrefix("thumbz-expand-") })?
-                .map { (tmp as NSString).appendingPathComponent($0) }.sorted() ?? []
-            return jsonResponse(["ok": true, "dumps": dumps, "tmp": tmp])
+            return jsonResponse(["ok": true])
         default:
             return httpResponse(status: 400, body: "Unknown action type: \(type)")
         }

@@ -5,23 +5,23 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Thumbz</string>
+	<string>Tiramisu</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeExtensions</key>
 			<array>
-				<string>thumbz</string>
+				<string>tiramisu</string>
 			</array>
 			<key>CFBundleTypeName</key>
-			<string>Thumbz Project</string>
+			<string>Tiramisu Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>ai.taiso.thumbz.project</string>
+				<string>world.hanley.tiramisu.project</string>
 			</array>
 		</dict>
 	</array>
@@ -32,7 +32,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Thumbz</string>
+	<string>Tiramisu</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -49,9 +49,9 @@
 		<false/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Thumbz never uses the camera directly.</string>
+	<string>Tiramisu never uses the camera directly.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>© 2026 Taiso</string>
+	<string>© 2026 Hanley Leung</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Import photos as layers to compose thumbnails.</string>
 	<key>UTExportedTypeDeclarations</key>
@@ -63,18 +63,18 @@
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>Thumbz Project</string>
+			<string>Tiramisu Project</string>
 			<key>UTTypeIdentifier</key>
-			<string>ai.taiso.thumbz.project</string>
+			<string>world.hanley.tiramisu.project</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-					<string>thumbz</string>
+					<string>tiramisu</string>
 				</array>
 				<key>public.mime-type</key>
 				<array>
-					<string>application/x-thumbz+json</string>
+					<string>application/x-tiramisu+json</string>
 				</array>
 			</dict>
 		</dict>

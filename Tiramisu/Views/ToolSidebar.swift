@@ -31,7 +31,7 @@ struct ToolSidebar: View {
                 set: { store.foreground = ColorRGB($0.asNSColor) }
             ))
             .labelsHidden()
-            .help("Foreground color")
+            .help("Paint color — used by Pencil, Pen, and other drawing tools")
         }
         .padding(.vertical, 8)
         .frame(maxHeight: .infinity)

@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 /// Local FLUX.1-Fill-dev inference via the user-installed `mflux` CLI.
 ///
-/// Architecture: Thumbz does NOT bundle Python, mflux, or the FLUX weights —
+/// Architecture: Tiramisu does NOT bundle Python, mflux, or the FLUX weights —
 /// the FLUX.1-Fill-dev license is non-commercial, weights are gated, and the
 /// download is ~30 GB. Instead, the user opts in by installing mflux locally
 /// (one-time setup, see `LocalFluxFillService.setupInstructions`). We detect
@@ -22,7 +22,7 @@ import UniformTypeIdentifiers
 /// Coordinator single-passes the whole canvas.
 struct LocalFluxFillService: GenerativeFillService {
     let mfluxPath: URL
-    let modelHFCacheDir: URL?     // optional HF_HOME override (e.g. /Volumes/T9/.huggingface)
+    let modelHFCacheDir: URL?     // optional HF_HOME override; nil = inherit user's env
     let stepCount: Int
     let guidanceScale: Float
     let quantize: Int             // 3 / 4 / 5 / 6 / 8 (Q4 default — fits comfortably on M1 Max)
@@ -65,7 +65,7 @@ struct LocalFluxFillService: GenerativeFillService {
           4. Authenticate:                   hf auth login
           5. (If short on disk) Set HF_HOME to an external drive in your shell.
 
-        Thumbz looks for mflux-generate-fill at ~/.local/bin/. First Expand pass
+        Tiramisu looks for mflux-generate-fill at ~/.local/bin/. First Expand pass
         triggers a one-time ~30 GB download of FLUX-Fill weights. Subsequent runs
         are ~2 minutes per fill on M1 Max with Q4 quantization.
 
@@ -83,10 +83,10 @@ struct LocalFluxFillService: GenerativeFillService {
         // Coordinator's post-processing in seconds. Toggle off to re-run live.
         let env = ProcessInfo.processInfo.environment
         let useCache = env["THUMBZ_FLUX_USE_CACHED"] != nil
-            || FileManager.default.fileExists(atPath: "/tmp/thumbz-flux-use-cached")
+            || FileManager.default.fileExists(atPath: "/tmp/tiramisu-flux-use-cached")
         if useCache {
             let cachedURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("thumbz-flux-raw-output.png")
+                .appendingPathComponent("tiramisu-flux-raw-output.png")
             if let cached = Self.loadAndRetagAsSRGB(cachedURL) {
                 progress("Using cached mflux output (debug fast-path)")
                 return cached
@@ -109,7 +109,7 @@ struct LocalFluxFillService: GenerativeFillService {
             : (Self.resize(mask, to: CGSize(width: w, height: h)) ?? mask)
 
         let runDir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("thumbz-flux-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tiramisu-flux-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: runDir) }
         let imgURL = runDir.appendingPathComponent("image.png")
@@ -178,7 +178,7 @@ struct LocalFluxFillService: GenerativeFillService {
         // Save a copy of mflux's raw output where the rest of our debug
         // dumps live, so we can inspect what the model actually produced.
         let preservedURL = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("thumbz-flux-raw-output.png")
+            .appendingPathComponent("tiramisu-flux-raw-output.png")
         try? FileManager.default.removeItem(at: preservedURL)
         try? FileManager.default.copyItem(at: outURL, to: preservedURL)
 
