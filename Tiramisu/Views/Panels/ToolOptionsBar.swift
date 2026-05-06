@@ -22,7 +22,10 @@ struct ToolOptionsBar: View {
         .padding(.horizontal, 12)
         .frame(height: 36)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        // Liquid Glass: thin material reads as part of the macOS 26 chrome
+        // instead of a flat opaque strip. Falls back to the system bar
+        // material on older AppKit if the glass primitive isn't available.
+        .background(.bar)
     }
 }
 

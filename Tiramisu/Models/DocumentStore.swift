@@ -34,9 +34,16 @@ final class DocumentStore {
     private var watchers: [UUID: FileWatcher] = [:]
     private let recentsKey = "world.hanley.tiramisu.recentFiles"
     private let recentsMax = 10
-    // Debug / test harness server. Enabled by default in Debug builds; can be
-    // toggled at runtime from Debug → Control Server.
+    // Debug / test harness server.
+    // - Debug builds: ON by default (so AI agents and ad-hoc testing have a surface).
+    // - Release builds: OFF by default (privacy + attack-surface reduction —
+    //   we don't ship a public HTTP listener bound to localhost without explicit user opt-in).
+    // Toggleable at runtime from Debug → Control Server.
+    #if DEBUG
     var controlServerEnabled: Bool = true
+    #else
+    var controlServerEnabled: Bool = false
+    #endif
     var controlServerPort: Int = 7979
     /// Marquee selection in doc (top-down) coords. nil = no selection. Used by
     /// Generative Fill to constrain the regenerated region.
