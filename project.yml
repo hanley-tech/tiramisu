@@ -29,6 +29,11 @@ targets:
       - path: Tiramisu
         excludes:
           - "Resources/Info.plist"
+      # Ship bootstrap.sh inside the app's Resources/ so the one-click
+      # "Install Local FLUX-Fill…" action works in distributed builds.
+      # GenerativeFillUI looks it up via Bundle.main.url(forResource:)
+      - path: scripts/bootstrap.sh
+        buildPhase: resources
     resources:
       - Tiramisu/Resources/Assets.xcassets
     info:

@@ -56,20 +56,25 @@ struct LocalFluxFillService: GenerativeFillService {
 
     static var setupInstructions: String {
         """
-        Local FLUX-Fill setup (one-time):
+        Local FLUX-Fill needs a one-time install (mflux + ~24 GB model weights).
 
-          1. Install uv (if not already):  brew install uv
-          2. Install mflux:                  uv tool install mflux
-          3. Accept the FLUX-Fill license at:
+        Easiest path: click "Install Local FLUX-Fill…" below. That opens
+        Terminal and runs the bundled bootstrap script which handles uv,
+        mflux, the Hugging Face login prompt, and the model download.
+
+        Or run it manually:
+          1. brew install uv
+          2. uv tool install mflux
+          3. Accept the FLUX-Fill license at
              https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev
-          4. Authenticate:                   hf auth login
-          5. (If short on disk) Set HF_HOME to an external drive in your shell.
+          4. hf auth login
+          5. (If short on disk) Set HF_HOME to an external drive.
 
-        Tiramisu looks for mflux-generate-fill at ~/.local/bin/. First Expand pass
-        triggers a one-time ~30 GB download of FLUX-Fill weights. Subsequent runs
-        are ~2 minutes per fill on M1 Max with Q4 quantization.
+        Tiramisu looks for mflux-generate-fill at ~/.local/bin/. Each fill
+        takes ~2 minutes on M1 Max with Q4 quantization.
 
         License note: FLUX.1-Fill-dev is NON-COMMERCIAL. Personal use only.
+        Switch to Replicate (cloud) if you need commercial use.
         """
     }
 
