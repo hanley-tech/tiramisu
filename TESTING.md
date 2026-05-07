@@ -92,9 +92,19 @@ the entire main display, which leaks whatever's behind the app.
 
 ## CI
 
-`.github/workflows/test.yml` runs `./scripts/ai-check.sh` on every push to
-`main` and every PR. The HTML report is uploaded as an artifact. UI tests
-are skipped in CI for now (they're slow and require an active display).
+**Local-only for now.** Tiramisu targets macOS 26 (Tahoe) and GitHub's
+hosted macOS runners are still on macOS 15 — they can't build the app
+until they ship a `macos-26` runner image. Until then, every commit is
+verified by running `./scripts/ai-check.sh` on a real macOS 26 dev
+machine before pushing.
+
+When GitHub ships a macOS 26 runner, restore the test workflow:
+
+```bash
+git show ab10aa5:.github/workflows/test.yml > .github/workflows/test.yml
+```
+
+(That's the last commit where the workflow lived; adjust if more recent.)
 
 ## When tests fail
 
