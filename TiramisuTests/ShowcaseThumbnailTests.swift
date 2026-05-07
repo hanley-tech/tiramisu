@@ -19,14 +19,11 @@ final class ShowcaseThumbnailTests: XCTestCase {
 
     // MARK: - YouTube thumbnail (1280×720)
 
-    /// Reaction-style YT thumbnail: a subject silhouette on the right
-    /// (like a face cam shot), punchy gradient bg, big bold headline with
-    /// stroke + glow on the left. The look creators ship daily.
-    ///
-    /// The "subject" is procedurally generated — a stylized portrait
-    /// silhouette built from circles + rectangles + a gradient — and
-    /// placed via the actual SmartObject pipeline so this test also
-    /// exercises raster placement / transform / composite end-to-end.
+    /// Travel-vlog style YT thumbnail: real photo subject (CC-licensed
+    /// Unsplash photo from the Fixtures bundle) on the right side as a
+    /// smart object, punchy gradient bg, big bold headline with stroke +
+    /// glow on the left. The kind of layout creators ship daily for
+    /// "VLOGGED MY DAY IN ___" videos.
     func testYouTubeReactionThumbnail() throws {
         let store = DocumentStore()
         store.canvasSize = CGSize(width: 1280, height: 720)
@@ -51,33 +48,32 @@ final class ShowcaseThumbnailTests: XCTestCase {
         vignette.opacity = 0.45
         store.layers.append(vignette)
 
-        // Subject silhouette — placed as a smart object on the right side.
-        let subjectPNG = makeSubjectSilhouettePNG(width: 540, height: 720)
-        guard let subject = store.placeSmartImage(data: subjectPNG, format: "png") else {
-            return XCTFail("placeSmartImage failed for procedural subject")
+        // Real photo subject — loaded from the bundled CC-licensed fixture.
+        let cafePhoto = try fixture(named: "cafe", ext: "jpg")
+        guard let subject = store.placeSmartImage(data: cafePhoto, format: "jpg") else {
+            return XCTFail("placeSmartImage failed for fixture photo")
         }
-        // Position on the right third of the canvas
-        subject.smart?.scaleX = 1.0
-        subject.smart?.scaleY = 1.0
-        subject.smart?.centerX = 1280 - 270
+        // Position on the right side. placeSmartImage centers and fits;
+        // we shift right + scale up slightly so it dominates the right third.
+        subject.smart?.centerX = 1280 - 320
         subject.smart?.centerY = 360
         subject.styles.dropShadow.enabled = true
         subject.styles.dropShadow.color = .black
-        subject.styles.dropShadow.opacity = 0.5
-        subject.styles.dropShadow.distance = 12
-        subject.styles.dropShadow.blur = 22
+        subject.styles.dropShadow.opacity = 0.55
+        subject.styles.dropShadow.distance = 14
+        subject.styles.dropShadow.blur = 24
 
-        // Headline — left-aligned on the left two-thirds
+        // Headline — centered on the left third of the canvas.
         let headline = PXLayer(name: "Headline", kind: .text)
-        headline.text.string = "I CAN'T\nBELIEVE\nTHIS"
+        headline.text.string = "VLOG\nDAY 47"
         headline.text.fontName = "System"
         headline.text.fontSize = 180
         headline.text.weight = 800
-        headline.text.alignment = "left"
+        headline.text.alignment = "center"
         headline.text.lineHeight = 0.95
         headline.text.color = .white
-        headline.text.anchorX = 0.04
-        headline.text.anchorY = 0.5
+        headline.text.anchorX = 0.27
+        headline.text.anchorY = 0.42
         headline.styles.stroke.enabled = true
         headline.styles.stroke.color = .black
         headline.styles.stroke.size = 8
@@ -92,81 +88,37 @@ final class ShowcaseThumbnailTests: XCTestCase {
         headline.styles.dropShadow.blur = 18
         store.layers.append(headline)
 
+        // Subhead — small caps, accent color, centered under headline
+        let subhead = PXLayer(name: "Subhead", kind: .text)
+        subhead.text.string = "I FOUND THE BEST CAFE"
+        subhead.text.fontName = "System"
+        subhead.text.fontSize = 32
+        subhead.text.weight = 700
+        subhead.text.alignment = "center"
+        subhead.text.tracking = 4
+        subhead.text.color = ColorRGB(r: 1.0, g: 0.92, b: 0.40)
+        subhead.text.anchorX = 0.27
+        subhead.text.anchorY = 0.78
+        subhead.styles.stroke.enabled = true
+        subhead.styles.stroke.color = .black
+        subhead.styles.stroke.size = 3
+        store.layers.append(subhead)
+
         let cg = LayerRenderer.composite(store: store)!
         let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         assertSnapshot(of: img, as: .image(precision: 0.95))
     }
 
-    /// Builds a procedural "subject" PNG that reads as a person silhouette
-    /// from a distance — head + shoulders, vibrant accent color, transparent
-    /// background. Stand-in for what a creator's face-cam cutout looks like
-    /// after BG removal. Stays deterministic so the snapshot doesn't drift.
-    private func makeSubjectSilhouettePNG(width: Int, height: Int) -> Data {
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let ctx = CGContext(data: nil, width: width, height: height,
-                            bitsPerComponent: 8, bytesPerRow: width * 4,
-                            space: cs,
-                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        // Transparent background
-        ctx.clear(CGRect(x: 0, y: 0, width: width, height: height))
-
-        // Body color: warm peach (skin-suggestive without being realistic)
-        let body = CGColor(red: 1.00, green: 0.78, blue: 0.55, alpha: 1)
-        let highlight = CGColor(red: 1.00, green: 0.92, blue: 0.78, alpha: 1)
-
-        let cx = CGFloat(width) / 2
-        let headRadius = CGFloat(height) * 0.18
-        let headCenterY = CGFloat(height) * 0.32 // upper third (CG y=0 is bottom)
-
-        // Shoulders / torso — large rounded rect at the bottom
-        ctx.setFillColor(body)
-        let shoulderW: CGFloat = CGFloat(width) * 0.78
-        let shoulderH: CGFloat = CGFloat(height) * 0.42
-        let shoulderRect = CGRect(x: cx - shoulderW/2,
-                                  y: 0,
-                                  width: shoulderW,
-                                  height: shoulderH)
-        ctx.addPath(CGPath(roundedRect: shoulderRect,
-                           cornerWidth: shoulderW * 0.22,
-                           cornerHeight: shoulderW * 0.22,
-                           transform: nil))
-        ctx.fillPath()
-
-        // Neck
-        let neckRect = CGRect(x: cx - CGFloat(width) * 0.07,
-                              y: shoulderH - 8,
-                              width: CGFloat(width) * 0.14,
-                              height: CGFloat(height) * 0.07)
-        ctx.setFillColor(body)
-        ctx.fill(neckRect)
-
-        // Head — circle
-        ctx.setFillColor(body)
-        ctx.fillEllipse(in: CGRect(x: cx - headRadius,
-                                    y: CGFloat(height) - headCenterY - headRadius,
-                                    width: headRadius * 2,
-                                    height: headRadius * 2))
-
-        // Highlight pop on the head (suggests light source from upper-right)
-        ctx.setFillColor(highlight)
-        ctx.fillEllipse(in: CGRect(x: cx - 8,
-                                    y: CGFloat(height) - headCenterY + headRadius * 0.1,
-                                    width: headRadius * 0.7,
-                                    height: headRadius * 0.55))
-
-        // Shoulder highlight stroke
-        ctx.setStrokeColor(highlight)
-        ctx.setLineWidth(6)
-        let shoulderHighlight = CGPath(roundedRect: shoulderRect.insetBy(dx: 14, dy: 14),
-                                        cornerWidth: shoulderW * 0.20,
-                                        cornerHeight: shoulderW * 0.20, transform: nil)
-        ctx.addPath(shoulderHighlight)
-        ctx.strokePath()
-
-        let cg = ctx.makeImage()!
-        let rep = NSBitmapImageRep(cgImage: cg)
-        rep.size = NSSize(width: width, height: height)
-        return rep.representation(using: .png, properties: [:])!
+    /// Loads a CC-licensed photo from the bundled `Fixtures/` directory.
+    /// See `TiramisuTests/Fixtures/ATTRIBUTION.md` for sources and license.
+    private func fixture(named name: String, ext: String) throws -> Data {
+        let bundle = Bundle(for: ShowcaseThumbnailTests.self)
+        guard let url = bundle.url(forResource: name, withExtension: ext) else {
+            throw NSError(domain: "ShowcaseThumbnailTests", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Fixture \(name).\(ext) is not in the test bundle. Check project.yml's TiramisuTests resources block."
+            ])
+        }
+        return try Data(contentsOf: url)
     }
 
     // MARK: - Instagram square post (1080×1080)

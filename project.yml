@@ -104,6 +104,15 @@ targets:
     platform: macOS
     sources:
       - path: TiramisuTests
+        excludes:
+          # Snapshot goldens + fixture photos are bundled as resources,
+          # not compiled. The default path-include pattern would otherwise
+          # try to treat .png/.jpg as compilable inputs and warn.
+          - "**/__Snapshots__/**"
+          - "**/Fixtures/**"
+      # Bundled test resources — accessible via Bundle(for: <test>.self).
+      - path: TiramisuTests/Fixtures
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: world.hanley.tiramisu.tests
