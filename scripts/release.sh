@@ -4,7 +4,6 @@
 # Usage:
 #   scripts/release.sh v0.1.0
 #   scripts/release.sh v0.1.0 --no-sign --no-notarize  # unsigned dev build
-#   scripts/release.sh v0.1.0 --no-mirror              # skip Lightsail rsync
 #   scripts/release.sh v0.1.0 --draft                  # GitHub Release as draft
 #
 # Requires (all enforced by the pre-flight check below):
@@ -17,7 +16,6 @@
 #         --apple-id <your apple id email> \
 #         --team-id  FG5Y9SD7U6 \
 #         --password <app-specific-password from appleid.apple.com>
-#   - SSH key for the Lightsail mirror at ~/.ssh/lightsail-hanley-world.pem
 #
 # What happens:
 #   1. Pre-flight (clean tree, tag exists, tools available)
@@ -32,23 +30,26 @@
 #   8. Notarize + staple the DMG (so the DMG mount is silent too —
 #      without DMG staple, Gatekeeper prompts on the *first mount* even
 #      if the .app inside is fine)
-#   9. gh release create + upload DMG asset
-#  10. rsync DMG to /var/www/tiramisu.hanley.world/download/ — both a
-#      version-pinned filename and a Tiramisu.dmg "latest" symlink.
+#   9. gh release create + upload DMG asset (named Tiramisu.dmg so the
+#      always-latest GitHub URL serves it without per-release config)
+#
+# Distribution: GitHub Releases is the canonical and only host. The
+# tiramisu.hanley.world/download URL is an nginx 302 redirect to
+# github.com/hanley-tech/tiramisu/releases/latest/download/Tiramisu.dmg.
+# That keeps the brand visible in the homepage button while letting
+# GitHub's CDN absorb HN-front-page-grade traffic spikes.
 
 set -euo pipefail
 
 # ── flags / defaults ─────────────────────────────────────────────────
 DO_SIGN=1
 DO_NOTARIZE=1
-DO_MIRROR=1
 DO_DRAFT=0
 TAG=""
 for arg in "$@"; do
     case "$arg" in
         --no-sign)     DO_SIGN=0; DO_NOTARIZE=0 ;;  # notarize requires signing
         --no-notarize) DO_NOTARIZE=0 ;;
-        --no-mirror)   DO_MIRROR=0 ;;
         --draft)       DO_DRAFT=1 ;;
         -h|--help)
             sed -n '2,30p' "$0"
@@ -61,7 +62,7 @@ for arg in "$@"; do
 done
 
 if [[ -z "$TAG" ]]; then
-    echo "usage: $0 v<X.Y.Z> [--no-sign] [--no-notarize] [--no-mirror] [--draft]" >&2
+    echo "usage: $0 v<X.Y.Z> [--no-sign] [--no-notarize] [--draft]" >&2
     exit 2
 fi
 
@@ -74,16 +75,17 @@ DEV_ID="Developer ID Application: Hanley Tze Ho Leung (FG5Y9SD7U6)"
 TEAM_ID="FG5Y9SD7U6"
 NOTARY_PROFILE="tiramisu-notary"
 GH_REPO="hanley-tech/tiramisu"
-MIRROR_SSH="ubuntu@34.212.8.221"
-MIRROR_KEY="$HOME/.ssh/lightsail-hanley-world.pem"
-MIRROR_DIR="/var/www/tiramisu.hanley.world/download"
 
 VERSION="${TAG#v}"
 BUILD_DIR="$PROJECT_DIR/build/release"
 ARCHIVE_PATH="$BUILD_DIR/Tiramisu.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export"
 APP_PATH="$EXPORT_DIR/Tiramisu.app"
-DMG_NAME="Tiramisu-$TAG.dmg"
+# Asset name has no version suffix so the always-latest GitHub URL works:
+#   github.com/hanley-tech/tiramisu/releases/latest/download/Tiramisu.dmg
+# The release tag (v0.1.0) carries the version info via the tag URL when
+# someone needs to link to a historical version.
+DMG_NAME="Tiramisu.dmg"
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -93,7 +95,7 @@ warn() { printf '\033[1;33m! %s\033[0m\n' "$*" >&2; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ── 1. pre-flight ────────────────────────────────────────────────────
-step "1/10 pre-flight checks"
+step "1/9  pre-flight checks"
 
 # Clean working tree
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -129,19 +131,14 @@ if [[ "$DO_NOTARIZE" -eq 1 ]]; then
     fi
 fi
 
-# Mirror key (only if mirroring)
-if [[ "$DO_MIRROR" -eq 1 ]]; then
-    [[ -f "$MIRROR_KEY" ]] || fail "Lightsail SSH key not at $MIRROR_KEY"
-fi
-
-ok "pre-flight passed (tag=$TAG, sign=$DO_SIGN, notarize=$DO_NOTARIZE, mirror=$DO_MIRROR)"
+ok "pre-flight passed (tag=$TAG, sign=$DO_SIGN, notarize=$DO_NOTARIZE)"
 
 # Clean previous build output
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR" "$EXPORT_DIR"
 
 # ── 2. archive ───────────────────────────────────────────────────────
-step "2/10 xcodegen + xcodebuild archive (Release)"
+step "2/9  xcodegen + xcodebuild archive (Release)"
 xcodegen generate >/dev/null
 xcodebuild \
     -project Tiramisu.xcodeproj \
@@ -155,7 +152,7 @@ xcodebuild \
 ok "archive built"
 
 # ── 3. export .app ───────────────────────────────────────────────────
-step "3/10 export Tiramisu.app from archive"
+step "3/9  export Tiramisu.app from archive"
 # Copy the .app out of the .xcarchive. We don't use xcodebuild -exportArchive
 # because it requires a manual ExportOptions.plist + provisioning profile dance
 # that we don't need for Developer ID signing — the .app inside the archive
@@ -166,7 +163,7 @@ ok "Tiramisu.app exported to $EXPORT_DIR/"
 
 # ── 4. codesign ──────────────────────────────────────────────────────
 if [[ "$DO_SIGN" -eq 1 ]]; then
-    step "4/10 codesign with Developer ID + hardened runtime + timestamp"
+    step "4/9  codesign with Developer ID + hardened runtime + timestamp"
     # --deep is deprecated for new code but fine here; we have a flat app with
     # no nested helpers. --options runtime is required for notarization.
     codesign --force --deep --options runtime --timestamp \
@@ -175,13 +172,13 @@ if [[ "$DO_SIGN" -eq 1 ]]; then
     codesign --verify --deep --strict --verbose=2 "$APP_PATH" 2>&1 | tail -3
     ok "Tiramisu.app signed"
 else
-    step "4/10 codesign — SKIPPED (--no-sign)"
+    step "4/9  codesign — SKIPPED (--no-sign)"
     warn "DMG will be unsigned. Users will need right-click → Open to bypass Gatekeeper."
 fi
 
 # ── 5. notarize ──────────────────────────────────────────────────────
 if [[ "$DO_NOTARIZE" -eq 1 ]]; then
-    step "5/10 notarize via Apple's service (this can take 1-5 min)"
+    step "5/9  notarize via Apple's service (this can take 1-5 min)"
     # notarytool needs a zip — we make it from the .app, then staple the
     # notarization back to the .app afterwards.
     NOTARY_ZIP="$BUILD_DIR/Tiramisu-notarize.zip"
@@ -194,11 +191,11 @@ if [[ "$DO_NOTARIZE" -eq 1 ]]; then
     xcrun stapler validate "$APP_PATH" 2>&1 | tail -2
     ok "notarization stapled to Tiramisu.app"
 else
-    step "5/10 notarize — SKIPPED (--no-notarize)"
+    step "5/9  notarize — SKIPPED (--no-notarize)"
 fi
 
 # ── 6. DMG ───────────────────────────────────────────────────────────
-step "6/10 create-dmg"
+step "6/9  create-dmg"
 # Use a clean staging folder so create-dmg doesn't sweep up build artifacts.
 DMG_STAGE="$BUILD_DIR/dmg-stage"
 mkdir -p "$DMG_STAGE"
@@ -221,7 +218,7 @@ ok "DMG built: $DMG_PATH ($DMG_SIZE)"
 
 # ── 7. codesign the DMG ──────────────────────────────────────────────
 if [[ "$DO_SIGN" -eq 1 ]]; then
-    step "7/10 codesign the DMG"
+    step "7/9  codesign the DMG"
     # Apple's modern advice: sign the outer container too. Without a
     # signed DMG, the .app inside is fine but the DMG itself triggers
     # Gatekeeper prompts on the first mount. --timestamp is required
@@ -230,12 +227,12 @@ if [[ "$DO_SIGN" -eq 1 ]]; then
     codesign --verify --verbose=2 "$DMG_PATH" 2>&1 | tail -2
     ok "DMG signed"
 else
-    step "7/10 codesign DMG — SKIPPED (--no-sign)"
+    step "7/9  codesign DMG — SKIPPED (--no-sign)"
 fi
 
 # ── 8. notarize the DMG ──────────────────────────────────────────────
 if [[ "$DO_NOTARIZE" -eq 1 ]]; then
-    step "8/10 notarize the DMG (silent first-mount)"
+    step "8/9  notarize the DMG (silent first-mount)"
     # The DMG itself goes through notarization. After this completes,
     # both the DMG mount AND the .app launch will be silent for users:
     #   - DMG mount → Gatekeeper sees the DMG's stapled ticket, OK
@@ -251,11 +248,11 @@ if [[ "$DO_NOTARIZE" -eq 1 ]]; then
     spctl -a -t open --context context:primary-signature -v "$DMG_PATH" 2>&1 | tail -2
     ok "DMG notarized + stapled — both DMG mount and .app launch are silent"
 else
-    step "8/10 notarize DMG — SKIPPED (--no-notarize)"
+    step "8/9  notarize DMG — SKIPPED (--no-notarize)"
 fi
 
 # ── 9. GitHub Release ────────────────────────────────────────────────
-step "9/10 publish to GitHub Releases"
+step "9/9  publish to GitHub Releases"
 RELEASE_FLAGS=(--repo "$GH_REPO" --title "Tiramisu $TAG")
 [[ "$DO_DRAFT" -eq 1 ]] && RELEASE_FLAGS+=(--draft)
 
@@ -277,30 +274,12 @@ else
 fi
 ok "GitHub Release published: https://github.com/$GH_REPO/releases/tag/$TAG"
 
-# ── 10. mirror to Lightsail ──────────────────────────────────────────
-if [[ "$DO_MIRROR" -eq 1 ]]; then
-    step "10/10 mirror DMG to tiramisu.hanley.world/download/"
-    # Push two paths:
-    #   /download/Tiramisu-vX.Y.Z.dmg — version-specific archive
-    #   /download/Tiramisu.dmg        — alias of latest, for the homepage button
-    ssh -i "$MIRROR_KEY" "$MIRROR_SSH" "mkdir -p $MIRROR_DIR" 2>/dev/null
-    rsync -avz -e "ssh -i $MIRROR_KEY" \
-        "$DMG_PATH" "$MIRROR_SSH:$MIRROR_DIR/$DMG_NAME"
-    # Symlink "latest" so https://tiramisu.hanley.world/download/Tiramisu.dmg
-    # always serves the most recent version.
-    ssh -i "$MIRROR_KEY" "$MIRROR_SSH" \
-        "cd $MIRROR_DIR && ln -sf $DMG_NAME Tiramisu.dmg"
-    ok "mirrored to https://tiramisu.hanley.world/download/$DMG_NAME"
-    ok "homepage link: https://tiramisu.hanley.world/download/Tiramisu.dmg"
-else
-    step "10/10 Lightsail mirror — SKIPPED (--no-mirror)"
-fi
-
 # ── done ─────────────────────────────────────────────────────────────
 echo
 ok "Release complete: $TAG"
 echo
-echo "  GitHub:    https://github.com/$GH_REPO/releases/tag/$TAG"
-echo "  Direct:    https://tiramisu.hanley.world/download/$DMG_NAME"
-echo "  Latest:    https://tiramisu.hanley.world/download/Tiramisu.dmg"
-echo "  Local DMG: $DMG_PATH"
+echo "  GitHub release:    https://github.com/$GH_REPO/releases/tag/$TAG"
+echo "  Direct DMG:        https://github.com/$GH_REPO/releases/download/$TAG/Tiramisu.dmg"
+echo "  Always-latest URL: https://github.com/$GH_REPO/releases/latest/download/Tiramisu.dmg"
+echo "  Branded redirect:  https://tiramisu.hanley.world/download"
+echo "  Local DMG:         $DMG_PATH"

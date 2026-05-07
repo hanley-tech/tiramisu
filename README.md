@@ -6,17 +6,21 @@
 </p>
 
 <p align="center">
+  <a href="https://tiramisu.hanley.world/download"><strong>⬇  Download for macOS</strong></a> ·
   <a href="https://tiramisu.hanley.world">tiramisu.hanley.world</a> ·
   <a href="https://tiramisu.hanley.world/getting-started.html">Getting started</a> ·
-  <a href="https://tiramisu.hanley.world/branding.html">Brand kit</a>
+  <a href="https://github.com/hanley-tech/tiramisu/releases">All releases</a>
 </p>
 
 ---
 
 ## Status
 
-🚧 **Pre-release · v0.1 in active development.**
-The app builds and runs; the AI-native intent bar and the YouTube-thumbnail end-to-end workflow are being polished before the first signed DMG ships. Star or watch to get notified.
+**Latest release:** see [`/releases/latest`](https://github.com/hanley-tech/tiramisu/releases/latest).
+Always-current direct download: <https://tiramisu.hanley.world/download>
+(redirects to the latest signed + notarized DMG on GitHub Releases).
+
+Requires **macOS 26 (Tahoe)** on **Apple Silicon (M1+)**.
 
 ## What is it
 
