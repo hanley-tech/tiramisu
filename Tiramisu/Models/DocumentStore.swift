@@ -334,6 +334,33 @@ enum Tool: String, CaseIterable, Sendable {
         case .relight: return "Relight"
         }
     }
+
+    /// True if the tool has a real canvas-interaction handler today.
+    /// False = placeholder button shown disabled with a "coming soon" tooltip.
+    /// Source-of-truth so ToolSidebar + any future palette display agree.
+    var isImplemented: Bool {
+        switch self {
+        case .move, .marquee, .text, .eyedropper, .relight: return true
+        case .pencil, .pen, .eraser: return false  // hand-drawing tools — v0.3+
+        }
+    }
+
+    /// Roadmap milestone for placeholder tools (used in tooltips).
+    var plannedFor: String? {
+        switch self {
+        case .pencil, .eraser: return "v0.3 (raster paint engine)"
+        case .pen:             return "v0.3 (vector paths)"
+        default:               return nil
+        }
+    }
+
+    /// Combined hover tooltip — label + roadmap note when placeholder.
+    var tooltip: String {
+        if let planned = plannedFor {
+            return "\(label) — coming in \(planned)"
+        }
+        return label
+    }
 }
 
 struct BrushSettings: Sendable {

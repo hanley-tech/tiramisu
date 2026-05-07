@@ -10,20 +10,42 @@ struct ToolSidebar: View {
         // the same vibrancy as the rest of the sidebar = no visible seam.
         VStack(spacing: 4) {
             ForEach(Tool.allCases, id: \.self) { tool in
+                let active = store.tool == tool
+                let placeholder = !tool.isImplemented
                 Button {
+                    // Placeholder buttons are visually disabled but the
+                    // selection still no-ops — users get a tooltip instead
+                    // of a silent click.
+                    guard !placeholder else { return }
                     store.tool = tool
                 } label: {
-                    Image(systemName: tool.symbol)
-                        .font(.system(size: 16, weight: .regular))
-                        .frame(width: 40, height: 40)
-                        .background {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(store.tool == tool ? Color.accentColor.opacity(0.25) : Color.clear)
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: tool.symbol)
+                            .font(.system(size: 16, weight: .regular))
+                            .frame(width: 40, height: 40)
+                            .background {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(active ? Color.accentColor.opacity(0.25) : Color.clear)
+                            }
+                            .foregroundStyle(
+                                placeholder ? Color.secondary.opacity(0.45)
+                                : active ? Color.accentColor
+                                : Color.primary
+                            )
+                        // Tiny dot in the corner of placeholder tools so users
+                        // can tell at a glance "this exists but isn't wired yet"
+                        // before they hover for the tooltip.
+                        if placeholder {
+                            Circle()
+                                .fill(Color.secondary.opacity(0.55))
+                                .frame(width: 5, height: 5)
+                                .offset(x: -6, y: 6)
                         }
-                        .foregroundStyle(store.tool == tool ? Color.accentColor : Color.primary)
+                    }
                 }
                 .buttonStyle(.plain)
-                .help(tool.label)
+                .disabled(placeholder)
+                .help(tool.tooltip)
             }
             Spacer()
             ColorPicker("", selection: Binding(
@@ -31,7 +53,7 @@ struct ToolSidebar: View {
                 set: { store.foreground = ColorRGB($0.asNSColor) }
             ))
             .labelsHidden()
-            .help("Paint color — used by Pencil, Pen, and other drawing tools")
+            .help("Paint color — used by drawing tools (coming in v0.3)")
         }
         .padding(.vertical, 8)
         .frame(maxHeight: .infinity)
