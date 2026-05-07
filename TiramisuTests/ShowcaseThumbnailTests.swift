@@ -19,90 +19,89 @@ final class ShowcaseThumbnailTests: XCTestCase {
 
     // MARK: - YouTube thumbnail (1280×720)
 
-    /// Travel-vlog style YT thumbnail: real photo subject (CC-licensed
-    /// Unsplash photo from the Fixtures bundle) on the right side as a
-    /// smart object, punchy gradient bg, big bold headline with stroke +
-    /// glow on the left. The kind of layout creators ship daily for
-    /// "VLOGGED MY DAY IN ___" videos.
+    /// Cinematic YT thumbnail: full-bleed dramatic sunset photo as the
+    /// canvas, dark vignette + multiply gradient at the bottom for text
+    /// contrast, MASSIVE shouty headline with stroke + warm glow, accent
+    /// pop subhead. The MrBeast / travel-creator style — high contrast,
+    /// bold typography, dramatic image, not subtle.
     func testYouTubeReactionThumbnail() throws {
         let store = DocumentStore()
         store.canvasSize = CGSize(width: 1280, height: 720)
-        store.backgroundColor = ColorRGB(r: 0.04, g: 0.05, b: 0.10)
+        store.backgroundColor = ColorRGB(r: 0.02, g: 0.02, b: 0.05)
         store.layers = []
 
-        // Background: deep purple → magenta diagonal
-        let bg = PXLayer(name: "BG Gradient", kind: .gradient)
-        bg.gradient.kind = "linear"
-        bg.gradient.angle = 135
-        bg.gradient.c1 = ColorRGB(r: 0.20, g: 0.08, b: 0.45)
-        bg.gradient.c2 = ColorRGB(r: 0.92, g: 0.18, b: 0.42)
-        store.layers.append(bg)
-
-        // Vignette
-        let vignette = PXLayer(name: "Vignette", kind: .gradient)
-        vignette.gradient.kind = "linear"
-        vignette.gradient.angle = 90
-        vignette.gradient.c1 = ColorRGB(r: 1, g: 1, b: 1)
-        vignette.gradient.c2 = ColorRGB(r: 0.05, g: 0.02, b: 0.10)
-        vignette.blend = .multiply
-        vignette.opacity = 0.45
-        store.layers.append(vignette)
-
-        // Real photo subject — loaded from the bundled CC-licensed fixture.
-        let cafePhoto = try fixture(named: "cafe", ext: "jpg")
-        guard let subject = store.placeSmartImage(data: cafePhoto, format: "jpg") else {
-            return XCTFail("placeSmartImage failed for fixture photo")
+        // Full-bleed dramatic photo — sunset over the ocean.
+        let sunset = try fixture(named: "sunset", ext: "jpg")
+        guard let photo = store.placeSmartImage(data: sunset, format: "jpg") else {
+            return XCTFail("placeSmartImage failed for sunset fixture")
         }
-        // Position on the right side. placeSmartImage centers and fits;
-        // we shift right + scale up slightly so it dominates the right third.
-        subject.smart?.centerX = 1280 - 320
-        subject.smart?.centerY = 360
-        subject.styles.dropShadow.enabled = true
-        subject.styles.dropShadow.color = .black
-        subject.styles.dropShadow.opacity = 0.55
-        subject.styles.dropShadow.distance = 14
-        subject.styles.dropShadow.blur = 24
+        // Scale up to fill 1280×720 canvas (source is 540×720 portrait).
+        if let smart = photo.smart {
+            let sw = Double(smart.pixelWidth)
+            let sh = Double(smart.pixelHeight)
+            // Cover the canvas: pick the larger of (canvasW/sw, canvasH/sh)
+            let coverScale = max(1280.0 / sw, 720.0 / sh)
+            photo.smart?.scaleX = coverScale
+            photo.smart?.scaleY = coverScale
+            photo.smart?.centerX = 640
+            photo.smart?.centerY = 360
+        }
+        // Boost saturation slightly — sunsets pop harder when juiced.
+        photo.adjust.saturation = 0.20
+        photo.adjust.contrast = 0.10
 
-        // Headline — centered on the left third of the canvas.
+        // Bottom-up dark gradient for text contrast — multiply, low opacity.
+        let darken = PXLayer(name: "Bottom Darken", kind: .gradient)
+        darken.gradient.kind = "linear"
+        darken.gradient.angle = 90
+        darken.gradient.c1 = ColorRGB(r: 1.0, g: 1.0, b: 1.0)        // top: no effect
+        darken.gradient.s1 = 0.0
+        darken.gradient.c2 = ColorRGB(r: 0.0, g: 0.0, b: 0.05)       // bottom: pure dark
+        darken.gradient.s2 = 1.0
+        darken.blend = .multiply
+        darken.opacity = 0.55
+        store.layers.append(darken)
+
+        // Massive headline — sits in the bottom third where the darken hits.
         let headline = PXLayer(name: "Headline", kind: .text)
-        headline.text.string = "VLOG\nDAY 47"
+        headline.text.string = "I CHASED\nTHE SUN"
         headline.text.fontName = "System"
-        headline.text.fontSize = 180
+        headline.text.fontSize = 220
         headline.text.weight = 800
         headline.text.alignment = "center"
-        headline.text.lineHeight = 0.95
+        headline.text.lineHeight = 0.9
         headline.text.color = .white
-        headline.text.anchorX = 0.27
-        headline.text.anchorY = 0.42
+        headline.text.anchorX = 0.5
+        headline.text.anchorY = 0.55
         headline.styles.stroke.enabled = true
         headline.styles.stroke.color = .black
-        headline.styles.stroke.size = 8
+        headline.styles.stroke.size = 10
         headline.styles.outerGlow.enabled = true
-        headline.styles.outerGlow.color = ColorRGB(r: 1.0, g: 0.85, b: 0.20)
-        headline.styles.outerGlow.opacity = 0.85
-        headline.styles.outerGlow.size = 60
+        headline.styles.outerGlow.color = ColorRGB(r: 1.0, g: 0.55, b: 0.10)
+        headline.styles.outerGlow.opacity = 1.0
+        headline.styles.outerGlow.size = 90
         headline.styles.dropShadow.enabled = true
         headline.styles.dropShadow.color = .black
-        headline.styles.dropShadow.opacity = 0.55
-        headline.styles.dropShadow.distance = 14
-        headline.styles.dropShadow.blur = 18
+        headline.styles.dropShadow.opacity = 0.7
+        headline.styles.dropShadow.distance = 16
+        headline.styles.dropShadow.blur = 24
         store.layers.append(headline)
 
-        // Subhead — small caps, accent color, centered under headline
-        let subhead = PXLayer(name: "Subhead", kind: .text)
-        subhead.text.string = "I FOUND THE BEST CAFE"
-        subhead.text.fontName = "System"
-        subhead.text.fontSize = 32
-        subhead.text.weight = 700
-        subhead.text.alignment = "center"
-        subhead.text.tracking = 4
-        subhead.text.color = ColorRGB(r: 1.0, g: 0.92, b: 0.40)
-        subhead.text.anchorX = 0.27
-        subhead.text.anchorY = 0.78
-        subhead.styles.stroke.enabled = true
-        subhead.styles.stroke.color = .black
-        subhead.styles.stroke.size = 3
-        store.layers.append(subhead)
+        // Top-corner badge — uppercase tracked, accent yellow, draws the eye
+        let badge = PXLayer(name: "Badge", kind: .text)
+        badge.text.string = "★ INSANE FOOTAGE ★"
+        badge.text.fontName = "System"
+        badge.text.fontSize = 36
+        badge.text.weight = 700
+        badge.text.alignment = "center"
+        badge.text.tracking = 6
+        badge.text.color = ColorRGB(r: 1.0, g: 0.92, b: 0.20)
+        badge.text.anchorX = 0.5
+        badge.text.anchorY = 0.10
+        badge.styles.stroke.enabled = true
+        badge.styles.stroke.color = .black
+        badge.styles.stroke.size = 4
+        store.layers.append(badge)
 
         let cg = LayerRenderer.composite(store: store)!
         let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
