@@ -144,11 +144,17 @@ Skip internal refactors and CI tweaks — link to the PR/commit list for those.
 
 ## What about CI?
 
-`.github/workflows/release.yml` is parked. GitHub-hosted macOS runners are
-still on macOS 15 — they can't build a macOS 26 deployment-target app
-until GitHub ships a `macos-26` runner image. Once they do, the workflow
-will resume firing on tag pushes; until then, all releases are local
-via `./scripts/release.sh`.
+`.github/workflows/release.yml` runs on `macos-26` (Apple Silicon) on
+every `v*` tag push. **But you'll likely still run `./scripts/release.sh`
+locally for the v0.1 ships** — the cert + notarytool credentials live
+in your Mac's keychain, and getting those into GitHub Actions secrets
+is more setup than the script's local flow. Once you do that work
+(import .p12 as a base64 secret, etc.), the CI release becomes one
+`git push origin v0.1.0` away — see the commented-out import/sign/
+notarize steps in release.yml.
+
+Local script: full control, runs today.
+CI workflow: reproducible, no-dev-machine releases, but needs secrets wired up.
 
 ## What lives where
 

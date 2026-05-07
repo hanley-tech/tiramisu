@@ -92,19 +92,18 @@ the entire main display, which leaks whatever's behind the app.
 
 ## CI
 
-**Local-only for now.** Tiramisu targets macOS 26 (Tahoe) and GitHub's
-hosted macOS runners are still on macOS 15 — they can't build the app
-until they ship a `macos-26` runner image. Until then, every commit is
-verified by running `./scripts/ai-check.sh` on a real macOS 26 dev
-machine before pushing.
+`.github/workflows/test.yml` runs `./scripts/ai-check.sh` on every push
+to `main` and every PR, on the `macos-26` Apple Silicon runner — same
+SDK + arch as your dev machine. Both the HTML report and the xcresult
+bundle are uploaded as artifacts (30-day and 14-day retention).
 
-When GitHub ships a macOS 26 runner, restore the test workflow:
+UI tests are skipped in CI (slow, require an active display); the
+local `--with-ui` invocation covers them. If you want CI to run UI
+tests too, add `--with-ui` to the `ai-check` step in test.yml.
 
-```bash
-git show ab10aa5:.github/workflows/test.yml > .github/workflows/test.yml
-```
-
-(That's the last commit where the workflow lived; adjust if more recent.)
+`runs-on: macos-26` is pinned explicitly. `macos-latest` still resolves
+to macos-15 at the time of writing — re-evaluate the pin annually as
+GitHub rotates the alias forward.
 
 ## When tests fail
 
