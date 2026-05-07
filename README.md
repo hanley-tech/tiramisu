@@ -30,7 +30,7 @@ A real layered image editor — like Photoshop, but free, open, native to Apple 
 - **AI-native** — generative fill, expand, replace, remove; intent bar at the canvas (v0.1)
 - **Mac-native** — Swift 6, Liquid Glass, Apple Silicon, on-device generation via [mflux](https://github.com/filipstrand/mflux)
 - **Built for creators** — every platform's safe-area baked in; cross-post auto-relayout; brand kits; native `.tiramisu` document type
-- **Free, forever** — open source under AGPL-3.0 (pending). No subscription. No Pro tier.
+- **Free, forever** — open source under AGPL-3.0. No subscription. No Pro tier.
 
 For the full vision + strategy + design direction, see **[tiramisu.hanley.world](https://tiramisu.hanley.world)**.
 
@@ -108,7 +108,7 @@ The marketing site (10 HTML pages, brand kit, design docs) lives in a separate r
 
 ## License
 
-To be finalized — likely **AGPL-3.0** (protects against fork-and-resell as a closed product). Until the LICENSE file lands, treat as "all rights reserved" pending license selection.
+**AGPL-3.0** — see [`LICENSE`](LICENSE). You can use, modify, and redistribute Tiramisu freely; the catch is that any modified version you distribute (including over a network) must also be released under AGPL-3.0 with source available. This protects against fork-and-resell as a closed product.
 
 ## Contributing
 
