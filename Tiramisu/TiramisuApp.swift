@@ -13,11 +13,14 @@ struct TiramisuApp: App {
                 .frame(minWidth: 1280, minHeight: 800)
                 .task {
                     appDelegate.attach(store: store)
-                    if store.controlServerEnabled {
+                    let isUITest = ProcessInfo.processInfo.arguments.contains("--ui-test")
+                    if store.controlServerEnabled && !isUITest {
                         ControlServer.shared.start(on: store.controlServerPort, store: store)
                     }
-                    // Show the first-run welcome dialog if it hasn't been dismissed.
-                    WelcomeWindow.showIfNeeded()
+                    if !isUITest {
+                        // Show the first-run welcome dialog if it hasn't been dismissed.
+                        WelcomeWindow.showIfNeeded()
+                    }
                 }
                 .onOpenURL { url in
                     TiramisuApp.loadFile(url: url, into: store)
@@ -92,5 +95,10 @@ final class TiramisuAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // In UI-test mode, let closing the last window quit the app so the
+        // XCUITest runner can terminate cleanly without the user-visible
+        // "are you sure?" save prompts that block teardown otherwise.
+        ProcessInfo.processInfo.arguments.contains("--ui-test")
+    }
 }

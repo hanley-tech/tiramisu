@@ -9,6 +9,9 @@ packages:
   RichTextKit:
     url: https://github.com/danielsaidi/RichTextKit
     from: 1.0.0
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    from: 1.17.0
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -90,4 +93,35 @@ targets:
         basedOnDependencyAnalysis: false
         runOnlyWhenInstalling: false
         shell: /bin/bash
+
+  TiramisuTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: TiramisuTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: world.hanley.tiramisu.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+    dependencies:
+      - target: Tiramisu
+      - package: SnapshotTesting
+        product: SnapshotTesting
+
+  TiramisuUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: TiramisuUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: world.hanley.tiramisu.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+    dependencies:
+      - target: Tiramisu
 

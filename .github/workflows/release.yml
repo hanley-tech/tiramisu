@@ -1,0 +1,118 @@
+# Release workflow — fires on a `v*` git tag.
+#
+# Status: SKELETON. Signing + notarization are commented out until an Apple
+# Developer ID cert is acquired and the following secrets are set in the repo:
+#
+#   APPLE_DEVELOPER_ID_APP_CERT     base64 .p12 of the Developer ID Application cert
+#   APPLE_DEVELOPER_ID_APP_PASSWORD password for that .p12
+#   APPLE_NOTARIZE_APPLE_ID         apple ID email for notarytool
+#   APPLE_NOTARIZE_TEAM_ID          team ID for notarytool
+#   APPLE_NOTARIZE_APP_PASSWORD     app-specific password for notarytool
+#
+# Until then this workflow does the build + tests + uploads the unsigned .app +
+# the test report so a tag still produces a verifiable artifact.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.0)"
+        required: true
+
+jobs:
+  release:
+    name: Build & release Tiramisu.app
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write   # for gh release create
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install xcodegen + create-dmg
+        run: brew install xcodegen create-dmg
+
+      - name: Run tests (gate the release on green)
+        run: ./scripts/ai-check.sh
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          tag="${{ github.event.inputs.tag }}"
+          if [[ -z "$tag" ]]; then tag="${GITHUB_REF#refs/tags/}"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Building $tag"
+
+      - name: xcodegen
+        run: xcodegen generate
+
+      - name: Archive (Release)
+        run: |
+          xcodebuild \
+            -project Tiramisu.xcodeproj \
+            -scheme Tiramisu \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath build/Tiramisu.xcarchive \
+            archive
+
+      - name: Export .app
+        run: |
+          mkdir -p build/export
+          cp -R build/Tiramisu.xcarchive/Products/Applications/Tiramisu.app build/export/
+
+      # ─── Signing + notarization (uncomment when secrets are set) ───
+      # - name: Import Developer ID cert
+      #   uses: apple-actions/import-codesign-certs@v3
+      #   with:
+      #     p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APP_CERT }}
+      #     p12-password: ${{ secrets.APPLE_DEVELOPER_ID_APP_PASSWORD }}
+      #
+      # - name: Codesign
+      #   run: |
+      #     codesign --deep --force --options runtime --timestamp \
+      #       --sign "Developer ID Application" \
+      #       build/export/Tiramisu.app
+      #
+      # - name: Notarize
+      #   run: |
+      #     ditto -c -k --keepParent build/export/Tiramisu.app build/Tiramisu.zip
+      #     xcrun notarytool submit build/Tiramisu.zip \
+      #       --apple-id "${{ secrets.APPLE_NOTARIZE_APPLE_ID }}" \
+      #       --team-id "${{ secrets.APPLE_NOTARIZE_TEAM_ID }}" \
+      #       --password "${{ secrets.APPLE_NOTARIZE_APP_PASSWORD }}" \
+      #       --wait
+      #     xcrun stapler staple build/export/Tiramisu.app
+
+      - name: Build DMG
+        run: |
+          create-dmg \
+            --volname "Tiramisu ${{ steps.tag.outputs.tag }}" \
+            --window-size 540 380 \
+            --icon-size 96 \
+            --icon "Tiramisu.app" 140 180 \
+            --app-drop-link 400 180 \
+            "build/Tiramisu-${{ steps.tag.outputs.tag }}.dmg" \
+            "build/export/" || true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "Tiramisu ${{ steps.tag.outputs.tag }}" \
+            --notes "Automated release. See the test report artifact for verification." \
+            --draft \
+            "build/Tiramisu-${{ steps.tag.outputs.tag }}.dmg" \
+            "build/test-report.html"
