@@ -31,15 +31,50 @@ final class LayerMaskSnapshotTests: XCTestCase {
         }
     }
 
-    /// Drop shadow + mask: a hard half mask with a drop shadow enabled.
-    /// The shadow must trace the mask edge (vertical line down the middle of
-    /// the cafe), not the layer's full alpha — proves the apply-order in
-    /// LayerRenderer.render() (mask runs BEFORE drop shadow).
+    /// Drop shadow + mask: a CIRCULAR mask centered in the photo source,
+    /// with a drop shadow enabled. The shadow must trace the circle's
+    /// silhouette (a curved offset crescent), not the photo's rectangular
+    /// alpha. A circle mask + a sharply offset shadow makes "shadow follows
+    /// the mask edge" visually unmistakable in the golden — way easier to
+    /// eyeball than the half-canvas linear edge the v0.4.0 cut used.
     func testMaskedDropShadowFollowsMaskEdge() throws {
         try renderMasked(name: "mask-shadow-follows-edge",
-                         dropShadow: true) { canvas in
-            hardHalfMask(size: canvas)
+                         dropShadow: true) { source in
+            circleMask(size: source)
         }
+    }
+
+    /// End-to-end test of the v0.4 non-destructive background-removal flow
+    /// on a real portrait. Vision's foreground-instance segmentation is the
+    /// production code path that users hit when they click "Remove
+    /// Background"; running it through the same renderer assures us the
+    /// portrait clean-up still works after every change to the mask
+    /// pipeline. kodim15 (a child portrait) is the canonical fixture for
+    /// this kind of test — clear single subject against a defocused
+    /// background, public domain. The snapshot pins the cutout silhouette;
+    /// any drift in mask scaling, alpha conversion, or smart-object
+    /// transform plumbing shows up immediately as visible halo or holes.
+    func testPortraitBackgroundRemoval() throws {
+        let store = DocumentStore()
+        store.canvasSize = CGSize(width: 768, height: 512)
+        store.backgroundColor = ColorRGB(r: 0.10, g: 0.10, b: 0.12)
+        store.layers = []
+
+        let portraitData = try fixture(named: "kodim15", ext: "png")
+        guard let layer = store.placeSmartImage(data: portraitData, format: "png"),
+              let cg = SmartObjectEngine.loadSource(layer.smart!) else {
+            return XCTFail("placeSmartImage failed for kodim15 fixture")
+        }
+        // Run the production BG-removal path. Vision is deterministic for
+        // a fixed input → mask, so this snapshot is reproducible.
+        layer.mask = try BackgroundRemover.mask(from: cg)
+        store.invalidate()
+
+        let composite = LayerRenderer.composite(store: store)!
+        let img = NSImage(cgImage: composite, size: NSSize(width: composite.width, height: composite.height))
+        // Slightly looser precision: Vision segmentation has small float
+        // drift between macOS minor versions on the mask edge.
+        assertSnapshot(of: img, as: .image(precision: 0.95), named: "mask-portrait-vision-cutout")
     }
 
     /// Identity (all-white) mask — proves a present-but-fully-revealing mask
@@ -94,6 +129,28 @@ final class LayerMaskSnapshotTests: XCTestCase {
         // CIFilter blur drift across macOS minor versions justifies a slight
         // precision relaxation, matching LayerStyleSnapshotTests.
         assertSnapshot(of: img, as: .image(precision: 0.96), named: name)
+    }
+
+    /// White circle on a black background, sized to the source's smallest
+    /// dimension with a 10% margin. Produces an unambiguous silhouette for
+    /// the drop-shadow-follows-mask snapshot.
+    private func circleMask(size: CGSize) -> CGImage? {
+        let w = max(1, Int(size.width)), h = max(1, Int(size.height))
+        guard let cs = CGColorSpace(name: CGColorSpace.linearGray),
+              let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+        ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+        let radius = CGFloat(min(w, h)) * 0.4
+        let rect = CGRect(x: CGFloat(w) / 2 - radius,
+                          y: CGFloat(h) / 2 - radius,
+                          width: radius * 2,
+                          height: radius * 2)
+        ctx.fillEllipse(in: rect)
+        return ctx.makeImage()
     }
 
     private func hardHalfMask(size: CGSize) -> CGImage? {
