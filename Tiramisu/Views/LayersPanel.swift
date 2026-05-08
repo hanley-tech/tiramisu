@@ -6,8 +6,10 @@ struct LayersPanel: View {
     var body: some View {
         @Bindable var store = store
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("LAYERS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text("Layers")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
                 Spacer()
                 Menu {
                     Button("Paint") { store.addLayer(PXLayer(name: "Paint", kind: .raster)) }
@@ -15,14 +17,25 @@ struct LayersPanel: View {
                     Button("Gradient") { store.addLayer(PXLayer(name: "Gradient", kind: .gradient)) }
                     Button("Solid Color") { store.addLayer(PXLayer(name: "Solid", kind: .solid)) }
                 } label: { Image(systemName: "plus") }
-                .menuStyle(.borderlessButton).fixedSize()
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Add a new layer")
 
-                Button(action: { store.duplicateActive() }) { Image(systemName: "square.on.square") }.buttonStyle(.borderless)
-                Button(action: { store.removeActive() }) { Image(systemName: "trash") }.buttonStyle(.borderless)
+                Button { store.duplicateActive() } label: {
+                    Image(systemName: "square.on.square")
+                }
+                .buttonStyle(.borderless)
+                .help("Duplicate active layer (⌘J)")
+
+                Button { store.removeActive() } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete active layer")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            Divider()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            Divider().opacity(0.4)
 
             List(selection: Binding(
                 get: { store.activeLayerID },
@@ -158,9 +171,78 @@ struct LayerRow: View {
 
 private struct LayerThumbnail: View {
     let layer: PXLayer
+
     var body: some View {
-        Rectangle().fill(
-            LinearGradient(colors: [.gray.opacity(0.4), .gray.opacity(0.15)],
-                           startPoint: .top, endPoint: .bottom))
+        ZStack {
+            // Tiny checkerboard so transparent areas read as transparent
+            // (matches the canvas background language).
+            Rectangle().fill(Color(white: 0.10))
+            Rectangle().fill(Color(white: 0.13))
+                .mask(
+                    Canvas { ctx, size in
+                        let sq: CGFloat = 4
+                        let cols = Int(size.width / sq) + 1
+                        let rows = Int(size.height / sq) + 1
+                        for r in 0..<rows {
+                            for c in 0..<cols where (r + c) % 2 == 0 {
+                                let rect = CGRect(x: CGFloat(c) * sq, y: CGFloat(r) * sq, width: sq, height: sq)
+                                ctx.fill(Path(rect), with: .color(.white))
+                            }
+                        }
+                    }
+                )
+
+            // Type-specific content on top.
+            content
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .strokeBorder(.separator.opacity(0.6), lineWidth: 0.5)
+        )
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch layer.kind {
+        case .solid:
+            Rectangle().fill(layer.solid.color.swiftUIColor)
+        case .gradient:
+            gradientPreview
+        case .text:
+            // Text-style placeholder: a stylized "T" in the layer's color.
+            Text("T")
+                .font(.system(size: 13, weight: .heavy, design: .default))
+                .foregroundStyle(layer.text.color.swiftUIColor)
+        case .raster:
+            // Raster/smart-object preview is non-trivial (would need a thumbnail
+            // render). For now, show a generic image glyph. Defer real previews.
+            Image(systemName: layer.smart != nil ? "photo" : "paintbrush")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var gradientPreview: some View {
+        let g = layer.gradient
+        let c1 = g.c1.swiftUIColor
+        let c2 = g.c2.swiftUIColor
+        let angle = Angle(degrees: g.angle - 90)  // SwiftUI 0° = up; doc 0° = right
+        return Group {
+            if g.kind == "radial" {
+                RadialGradient(colors: [c1, c2], center: .center, startRadius: 1, endRadius: 22)
+            } else {
+                LinearGradient(
+                    colors: [c1, c2],
+                    startPoint: UnitPoint(
+                        x: 0.5 - 0.5 * cos(angle.radians),
+                        y: 0.5 - 0.5 * sin(angle.radians)
+                    ),
+                    endPoint: UnitPoint(
+                        x: 0.5 + 0.5 * cos(angle.radians),
+                        y: 0.5 + 0.5 * sin(angle.radians)
+                    )
+                )
+            }
+        }
     }
 }
