@@ -1,164 +1,160 @@
 # Releasing Tiramisu
 
-Tag-based releases. Local-built (GitHub-hosted runners don't have macOS 26
-SDK yet). One command: `./scripts/release.sh v<X.Y.Z>`.
+Tag-based releases, local-built (GitHub Actions runners don't have macOS 26
+SDK yet). One command for the build itself: `./scripts/release.sh v<X.Y.Z>`.
+The full *ship-a-version* flow — pre-flight, version bump, build, site
+updates — is the procedure below.
 
-## Cut a release
+---
+
+## TL;DR — ship a version
 
 ```bash
-# 1. Make sure main is green
-./scripts/ai-check.sh --with-ui
+# 1. Pre-flight: green tests on a clean tree
+./scripts/ai-check.sh
 
-# 2. Tag the release commit
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+# 2. Bump the version in project.yml + regenerate
+#    (CFBundleShortVersionString is the user-facing version,
+#     CFBundleVersion is the integer build number — increment both)
+$EDITOR project.yml
+xcodegen generate
+git add project.yml Tiramisu/Resources/Info.plist
+git commit -m "vX.Y.Z: bump version"
 
-# 3. Build, sign, notarize, package, publish
-./scripts/release.sh v0.1.0
+# 3. Merge feature branch → main (if applicable), push
+git checkout main
+git merge --no-ff <branch> -m "Merge <branch> — vX.Y.Z release"
+git push origin main
+
+# 4. Tag and push the tag
+git tag -a v0.2.0 -m "v0.2.0 — short summary"
+git push origin v0.2.0
+
+# 5. Build, sign, notarize, package, publish
+./scripts/release.sh v0.2.0
+
+# 6. Update the marketing site roadmap with newly-shipped items
+cd ../tiramisu_www
+$EDITOR roadmap.html  # mark items shipped, bump shipped counter
+git commit -am "Roadmap: mark vX.Y.Z shipped items"
+git push origin main  # rsync→Lightsail picks it up
+
+# Done. tiramisu.hanley.world/download now serves the new DMG.
 ```
 
-That's the whole flow. The script:
+---
 
-1. Pre-flight checks (clean tree, on the tag, tools available, cert in keychain, notarytool profile present)
+## Detailed steps
+
+### 1. Pre-flight tests
+
+`./scripts/ai-check.sh` runs `xcodegen generate` → `xcodebuild build` →
+`xcodebuild test` → writes `build/test-report.html`. Fail-fast on any
+breakage. Add `--with-ui` to include the slower UI test pass.
+
+If you've added new features, add light tests for them under
+`TiramisuTests/` before bumping the version. Examples from v0.2.0:
+`LayerArrangeTextTests.swift`, `AdjustPresetTests.swift` — each ~150 LOC,
+cover the public surface of the new code without snapshot churn.
+
+### 2. Version bump
+
+Edit `project.yml`:
+
+```yaml
+CFBundleShortVersionString: "0.2.0"   # bump per semver
+CFBundleVersion: "3"                  # monotonically increasing integer
+```
+
+Run `xcodegen generate` to regenerate the Xcode project + propagate the
+version into `Info.plist`. Commit both files together.
+
+**Versioning judgment:** UX overhauls, new feature surfaces, or anything
+that changes how users *interact* with the app deserves a minor bump
+(0.1.x → 0.2.0). Bug fixes, copy tweaks, single-file polish stay on
+patch (0.2.0 → 0.2.1).
+
+### 3. Merge + tag
+
+If shipping from a feature branch, merge with `--no-ff` so the merge
+commit captures the release boundary. Then tag the merge commit with
+the same version.
+
+```bash
+git tag -a v0.2.0 -m "v0.2.0 — inspector redesign + Adjust presets + …"
+git push origin v0.2.0
+```
+
+The release script enforces that the tag exists on the current HEAD.
+
+### 4. The release script
+
+`./scripts/release.sh v0.2.0` does:
+
+1. Pre-flight (clean tree, tag exists, tools available, cert in
+   keychain, `tiramisu-notary` notarytool profile present)
 2. `xcodebuild archive` (Release config, macOS 26 SDK)
 3. Export `Tiramisu.app` from the `.xcarchive`
-4. Codesign with Developer ID + hardened runtime + timestamp
-5. Notarize via `xcrun notarytool submit --wait`, then `stapler staple`
+4. Codesign the app (Developer ID + hardened runtime + timestamp)
+5. Notarize + staple the app (silent first launch even if extracted
+   from the DMG)
 6. Build the DMG with `create-dmg` (branded volume, app-drop link)
-7. `gh release create` and upload the DMG asset
-8. rsync the DMG to `/var/www/tiramisu.hanley.world/download/Tiramisu-vX.Y.Z.dmg` and update the `Tiramisu.dmg` symlink so the homepage button always points at the latest signed build
+7. Codesign the DMG (notarization requires a signed artifact)
+8. Notarize + staple the DMG (silent first mount)
+9. `gh release create` and upload `Tiramisu.dmg` (always-latest URL
+   serves it without per-release config)
 
-End-to-end on an M1 Max: roughly 3-6 minutes (notarization is the slowest step).
+Notarization runs in ~1–3 minutes; the script polls until accepted.
 
-## Skip flags
+### 5. Marketing-site roadmap update
 
-```bash
-./scripts/release.sh v0.1.0 --no-sign         # unsigned (dev / internal)
-./scripts/release.sh v0.1.0 --no-notarize     # signed but not stapled
-./scripts/release.sh v0.1.0 --no-mirror       # don't push to Lightsail
-./scripts/release.sh v0.1.0 --draft           # GitHub Release as draft
-```
+`tiramisu_www/roadmap.html` is the canonical "what shipped" page —
+public-facing, links from the homepage. After every release:
 
-`--no-sign` automatically implies `--no-notarize` (notarization requires a
-signed binary).
+1. Find each newly-shipped item in the relevant section
+   (Adjustments, Effects, etc.)
+2. Change `<li class="planned">` → `<li class="shipped">` and swap the
+   `☐` glyph for `✓`
+3. Tag the entry with a dim version suffix:
+   `<span style="opacity:0.6;font-size:0.85em">· v0.2</span>`
+4. Update the section's `<p class="group-stats">N shipped · M planned</p>`
+5. Update the top counter
+   (`<div class="summary-cell shipped"><div class="n">…</div></div>`)
+6. Commit and push to `main`. The Lightsail deployment runs on push.
 
-## One-time setup (do once, lasts forever)
+### 6. Distribution
 
-### 1. Developer ID Application cert in your keychain
+Distribution is GitHub Releases only. The branded URL
+`tiramisu.hanley.world/download` is an nginx 302 to
+`github.com/hanley-tech/tiramisu/releases/latest/download/Tiramisu.dmg`,
+so a new release auto-promotes — no DNS or homepage edits required.
 
-You already have this:
-```
-Developer ID Application: Hanley Tze Ho Leung (FG5Y9SD7U6)
-```
-Confirm with `security find-identity -v -p codesigning`.
+---
 
-### 2. Stored notarytool profile
+## What this procedure does *not* cover yet
 
-Notarization needs an Apple ID + app-specific password. Store them once
-in the keychain so the script can pull them non-interactively:
+- **Sparkle in-app auto-updates** — deferred to v0.3+. The `appcast.xml`
+  feed and signing key aren't set up; users have to download the new
+  DMG manually for now.
+- **Homebrew Cask** — submission to homebrew/cask is a one-time setup
+  for the formula, then auto-updates from GitHub Releases. Worth doing
+  before a public-launch tweet.
+- **Internal site (`tiramisu_www/internal/`)** — strategic docs, not
+  per-release. Update when *strategy* shifts, not when *features* ship.
+- **Newsletter announcement** — Listmonk on `lists.hanley.world` is
+  pending separate setup; the homepage signup form is HTML-commented
+  until the LIST_UUID is populated.
 
-```bash
-# Generate an app-specific password at https://appleid.apple.com → Sign-In Security
-xcrun notarytool store-credentials "tiramisu-notary" \
-  --apple-id "<your apple id email>" \
-  --team-id "FG5Y9SD7U6" \
-  --password "<app-specific password from appleid.apple.com>"
-```
+---
 
-Verify: `xcrun notarytool history --keychain-profile tiramisu-notary` should
-list past submissions (or empty list — both are fine).
+## Manual one-time setup (already done as of v0.1)
 
-### 3. create-dmg + xcodegen + gh CLI
+These don't need to run per release, but the scripts assume they
+exist:
 
-```bash
-brew install create-dmg xcodegen gh
-gh auth login   # active account = hanley-tech
-```
-
-### 4. Lightsail SSH key
-
-`~/.ssh/lightsail-hanley-world.pem` — backed up at
-`~/Documents/lightsail-hanley-world-keys-backup/`.
-
-## Where the DMG lands
-
-| Channel | URL |
-|---|---|
-| **GitHub Releases** (canonical, version-pinned) | `https://github.com/hanley-tech/tiramisu/releases/tag/v0.1.0` |
-| **Direct download** (homepage button) | `https://tiramisu.hanley.world/download/Tiramisu.dmg` (latest, symlink) |
-| **Direct download** (version-pinned) | `https://tiramisu.hanley.world/download/Tiramisu-v0.1.0.dmg` |
-
-The marketing site's deploy workflow excludes `download/` from its rsync,
-so the DMG mirror is never wiped by a site deploy.
-
-## Versioning
-
-Use SemVer:
-
-- **0.x.y** — pre-1.0, breaking changes allowed in minor bumps
-- **bug fix** → bump `y` (`v0.1.1`)
-- **feature** → bump `x` (`v0.2.0`)
-- **breaking** → bump major once we're past 1.0
-
-The version comes from the git tag — no need to edit `project.yml` or any
-plist. The DMG file gets named after the tag.
-
-## Hotfix on a shipped tag
-
-When `v0.1.0` is in users' hands and you need to ship a fix without
-dragging in everything that's landed on `main` since:
-
-```bash
-git checkout -b hotfix/v0.1.1 v0.1.0
-# Make the fix, test, commit
-./scripts/ai-check.sh
-git commit -am "fix: <thing>"
-git tag -a v0.1.1 -m "v0.1.1 — hotfix: <thing>"
-git push origin hotfix/v0.1.1 v0.1.1
-./scripts/release.sh v0.1.1
-
-# Get the fix back into main
-git checkout main
-git cherry-pick <hotfix-commit-sha>
-git push
-```
-
-The hotfix branch can be deleted afterwards; the tag is the permanent
-reference.
-
-## Release notes
-
-If `CHANGELOG.md` exists at the repo root, the script uses its contents
-as the GitHub Release body. Otherwise it falls back to
-`gh release create --generate-notes` (auto-built from commits since the
-previous tag).
-
-For a polished launch release, write `CHANGELOG.md` with:
-
-- What's new (user-facing)
-- Bug fixes (user-facing)
-- Breaking changes (if any)
-- Known issues
-
-Skip internal refactors and CI tweaks — link to the PR/commit list for those.
-
-## What about CI?
-
-`.github/workflows/release.yml` runs on `macos-26` (Apple Silicon) on
-every `v*` tag push. **But you'll likely still run `./scripts/release.sh`
-locally for the v0.1 ships** — the cert + notarytool credentials live
-in your Mac's keychain, and getting those into GitHub Actions secrets
-is more setup than the script's local flow. Once you do that work
-(import .p12 as a base64 secret, etc.), the CI release becomes one
-`git push origin v0.1.0` away — see the commented-out import/sign/
-notarize steps in release.yml.
-
-Local script: full control, runs today.
-CI workflow: reproducible, no-dev-machine releases, but needs secrets wired up.
-
-## What lives where
-
-- `scripts/release.sh` — the local-build pipeline (the one you actually run)
-- `.github/workflows/release.yml` — parked CI version (will work post-macOS-26)
-- `scripts/ai-check.sh` — pre-release green-tests check
-- `build/release/` — gitignored output: `.xcarchive`, exported `.app`, DMG
+- `xcrun notarytool store-credentials "tiramisu-notary"` with an
+  app-specific password from appleid.apple.com
+- `Developer ID Application: Hanley Tze Ho Leung (FG5Y9SD7U6)`
+  certificate in the login keychain
+- `gh` CLI signed in as `hanley-tech`
+- `brew install xcodegen create-dmg` for the build tools
