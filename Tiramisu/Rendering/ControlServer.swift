@@ -9,12 +9,19 @@ import AppKit
 /// Endpoints:
 ///   GET  /state         → JSON snapshot of document + layer tree
 ///   GET  /canvas.png    → PNG of the current composite
+///   GET  /window        → JSON with the main window's CGWindowID + frame, so a CLI
+///                         caller can `screencapture -l <id> out.png`. (We don't
+///                         capture pixels in-process: screen-recording TCC perms are
+///                         per-app and a subprocess of Tiramisu inherits *its*
+///                         perms, not Terminal's. Capturing from the calling
+///                         shell sidesteps the prompt entirely.)
 ///   GET  /log/tail      → plain-text tail of the log (last 200 lines)
 ///   POST /action        → JSON body with {"type":"…", …}
 ///       types:
 ///         - "newDocument"
 ///         - "addLayer"      { "kind": "raster|text|gradient|solid" }
 ///         - "selectLayer"   { "id": "<uuid>" }
+///         - "selectLayerByName" { "name": "Hero text" }
 ///         - "removeActive"
 ///         - "setText"       { "id": "<uuid>", "value": "..." }
 ///         - "setTextColor"  { "id": "<uuid>", "hex": "ff0000" }       // whole layer
@@ -26,6 +33,10 @@ import AppKit
 ///         - "savePath"      { "path": "/tmp/test.tiramisu" }
 ///         - "loadPath"      { "path": "/tmp/test.tiramisu" }
 ///         - "exportPNG"     { "path": "/tmp/out.png" }
+///         - "setInspectorTab" { "tab": "properties|adjust|effects" }
+///         - "setSection"    { "title": "Lighting", "open": true }
+///         - "clickAt"       { "x": 320, "y": 480 }                     // window-content coords (top-left origin)
+///         - "keystroke"     { "keys": "cmd+s" }                        // mods: cmd|opt|shift|ctrl, key: char or "return"/"escape"/"tab"/"space"
 @MainActor
 final class ControlServer {
     static let shared = ControlServer()
@@ -89,8 +100,9 @@ final class ControlServer {
         switch (method, path) {
         case ("GET", "/state"):         return handleState()
         case ("GET", "/canvas.png"):    return handleCanvasPNG()
+        case ("GET", "/window"):        return handleWindowInfo()
         case ("GET", "/log/tail"):      return handleLogTail()
-        case ("GET", "/"):              return httpResponse(status: 200, body: "Tiramisu Control Server. See /state, /canvas.png, /action")
+        case ("GET", "/"):              return httpResponse(status: 200, body: "Tiramisu Control Server. See /state, /canvas.png, /window, /action")
         case ("POST", "/action"):       return handleAction(request: request)
         default:
             return httpResponse(status: 404, body: "Not found: \(method) \(path)")
@@ -136,6 +148,32 @@ final class ControlServer {
         return httpResponse(status: 200, contentType: "image/png", bodyData: png)
     }
 
+    /// Return the main window's CGWindowID + frame. Callers can then use
+    ///     screencapture -x -l <windowID> out.png
+    /// to grab a UI screenshot — Terminal already has Screen Recording
+    /// permission, so this avoids the per-app TCC dance.
+    private func handleWindowInfo() -> Data {
+        guard let window = mainWindow() else {
+            let dump = NSApp.windows.map {
+                ["windowID": $0.windowNumber, "visible": $0.isVisible, "title": $0.title] as [String: Any]
+            }
+            return jsonResponse(["error": "No main window", "all": dump])
+        }
+        let f = window.frame
+        return jsonResponse([
+            "windowID": window.windowNumber,
+            "title": window.title,
+            "frame": ["x": f.minX, "y": f.minY, "width": f.width, "height": f.height],
+            "captureHint": "screencapture -x -l \(window.windowNumber) out.png"
+        ])
+    }
+
+    private func mainWindow() -> NSWindow? {
+        // Prefer the main window; otherwise the first visible non-panel.
+        if let w = NSApp.mainWindow, !(w is NSPanel) { return w }
+        return NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) })
+    }
+
     private func handleLogTail() -> Data {
         let entries = Log.console.entries.suffix(200)
         let text = entries.map { "\(ISO8601DateFormatter().string(from: $0.date)) [\($0.level)] \($0.message)" }.joined(separator: "\n")
@@ -167,6 +205,15 @@ final class ControlServer {
             return jsonResponse(["ok": true, "id": L.id.uuidString])
         case "selectLayer":
             if let id = obj["id"] as? String { store.activeLayerID = UUID(uuidString: id) }
+        case "selectLayerByName":
+            guard let name = obj["name"] as? String else {
+                return httpResponse(status: 400, body: "Missing 'name'")
+            }
+            guard let L = store.layers.first(where: { $0.name == name }) else {
+                return httpResponse(status: 404, body: "No layer named '\(name)'")
+            }
+            store.activeLayerID = L.id
+            return jsonResponse(["ok": true, "id": L.id.uuidString])
         case "removeActive":
             store.removeActive()
         case "setText":
@@ -272,11 +319,133 @@ final class ControlServer {
                 return httpResponse(status: 500, body: "Expand failed: \(threwError)")
             }
             return jsonResponse(["ok": true])
+        case "setZoom":
+            guard let z = obj["zoom"] as? Double else {
+                return httpResponse(status: 400, body: "Need 'zoom' (Double, 0.05–8)")
+            }
+            store.viewportZoom = max(0.05, min(8, z))
+            store.viewportZoomBase = store.viewportZoom
+            store.invalidate()
+        case "alignLayer":
+            // Mirrors the Move-tool alignment buttons. Useful for headless testing
+            // of LayerArrange without synthesizing UI clicks.
+            guard let anchorRaw = obj["anchor"] as? String else {
+                return httpResponse(status: 400, body: "Need 'anchor'")
+            }
+            let map: [String: LayerArrange.Anchor] = [
+                "topLeft": .topLeft, "topCenter": .topCenter, "topRight": .topRight,
+                "middleLeft": .middleLeft, "center": .center, "middleRight": .middleRight,
+                "bottomLeft": .bottomLeft, "bottomCenter": .bottomCenter, "bottomRight": .bottomRight
+            ]
+            guard let a = map[anchorRaw] else {
+                return httpResponse(status: 400, body: "Unknown anchor '\(anchorRaw)' — use topLeft|topCenter|topRight|middleLeft|center|middleRight|bottomLeft|bottomCenter|bottomRight")
+            }
+            LayerArrange.align(store, to: a)
+        case "setInspectorTab":
+            // The InspectorView reads its tab from @AppStorage("ui.inspector.tab"),
+            // so writing the same key flips the UI immediately via SwiftUI's KVO bridge.
+            guard let tab = obj["tab"] as? String,
+                  ["properties", "adjust", "effects"].contains(tab) else {
+                return httpResponse(status: 400, body: "tab must be properties|adjust|effects")
+            }
+            UserDefaults.standard.set(tab, forKey: "ui.inspector.tab")
+        case "setSection":
+            // InspectorSection persists open-state under
+            // "world.hanley.tiramisu.section.<title>" — same key the SwiftUI view binds to.
+            guard let title = obj["title"] as? String,
+                  let open = obj["open"] as? Bool else {
+                return httpResponse(status: 400, body: "Need 'title' (string) and 'open' (bool)")
+            }
+            UserDefaults.standard.set(open, forKey: "world.hanley.tiramisu.section.\(title)")
+        case "clickAt":
+            // Synthetic mouse click at window-content-relative coords (top-left origin,
+            // matching how /window.png is captured). Translates to global screen coords
+            // and posts a CGEvent — works against the app's own UI without prompting
+            // for accessibility permission as long as the events target our process.
+            guard let x = obj["x"] as? Double, let y = obj["y"] as? Double else {
+                return httpResponse(status: 400, body: "Need 'x' and 'y'")
+            }
+            guard let window = mainWindow(), let view = window.contentView else {
+                return httpResponse(status: 503, body: "No main window")
+            }
+            // Convert: window-content (top-left, points) → AppKit window (bottom-left)
+            //         → screen coords (CGEvent uses screen with origin at top-left).
+            let viewPoint = NSPoint(x: x, y: view.bounds.height - y)
+            let windowPoint = view.convert(viewPoint, to: nil)
+            let screenPoint = window.convertPoint(toScreen: windowPoint)
+            // CGEvent's screen origin is top-left; NSScreen is bottom-left — flip.
+            let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+            let cgPoint = CGPoint(x: screenPoint.x, y: screenHeight - screenPoint.y)
+            let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                mouseCursorPosition: cgPoint, mouseButton: .left)
+            let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                              mouseCursorPosition: cgPoint, mouseButton: .left)
+            down?.post(tap: .cghidEventTap)
+            up?.post(tap: .cghidEventTap)
+        case "keystroke":
+            guard let keys = obj["keys"] as? String else {
+                return httpResponse(status: 400, body: "Need 'keys' (e.g. 'cmd+s', 'return', 'a')")
+            }
+            guard postKeystroke(keys) else {
+                return httpResponse(status: 400, body: "Could not parse keystroke '\(keys)'")
+            }
         default:
             return httpResponse(status: 400, body: "Unknown action type: \(type)")
         }
         return jsonResponse(["ok": true])
     }
+
+    /// Parse "cmd+shift+a" / "return" / "tab" into a CGEvent and post it. Modifier
+    /// keys: cmd | opt | alt | shift | ctrl. Special keys: return | enter | escape | tab | space | delete.
+    private func postKeystroke(_ spec: String) -> Bool {
+        let parts = spec.lowercased().split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
+        guard let last = parts.last else { return false }
+        var flags: CGEventFlags = []
+        for mod in parts.dropLast() {
+            switch mod {
+            case "cmd", "command":      flags.insert(.maskCommand)
+            case "opt", "alt", "option": flags.insert(.maskAlternate)
+            case "shift":               flags.insert(.maskShift)
+            case "ctrl", "control":     flags.insert(.maskControl)
+            default: return false
+            }
+        }
+        let key: CGKeyCode
+        switch last {
+        case "return", "enter": key = 0x24
+        case "escape", "esc":   key = 0x35
+        case "tab":             key = 0x30
+        case "space":           key = 0x31
+        case "delete":          key = 0x33
+        case "left":            key = 0x7B
+        case "right":           key = 0x7C
+        case "down":            key = 0x7D
+        case "up":              key = 0x7E
+        default:
+            // Single-character keys: a-z, 0-9. Use a static table.
+            guard last.count == 1, let k = Self.charKeyCode[Character(last)] else { return false }
+            key = k
+        }
+        let down = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true)
+        let up = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false)
+        down?.flags = flags
+        up?.flags = flags
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+        return true
+    }
+
+    /// Apple-standard ANSI virtual key codes for the basic alphanumerics. Enough for
+    /// agent automation (`cmd+s`, `cmd+z`, `return`, etc.); not a full keyboard map.
+    private static let charKeyCode: [Character: CGKeyCode] = [
+        "a": 0x00, "s": 0x01, "d": 0x02, "f": 0x03, "h": 0x04, "g": 0x05,
+        "z": 0x06, "x": 0x07, "c": 0x08, "v": 0x09, "b": 0x0B, "q": 0x0C,
+        "w": 0x0D, "e": 0x0E, "r": 0x0F, "y": 0x10, "t": 0x11,
+        "1": 0x12, "2": 0x13, "3": 0x14, "4": 0x15, "6": 0x16, "5": 0x17,
+        "9": 0x19, "7": 0x1A, "8": 0x1C, "0": 0x1D,
+        "o": 0x1F, "u": 0x20, "i": 0x22, "p": 0x23, "l": 0x25,
+        "j": 0x26, "k": 0x28, "n": 0x2D, "m": 0x2E
+    ]
 
     // MARK: - HTTP plumbing
 
