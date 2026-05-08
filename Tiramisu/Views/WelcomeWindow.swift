@@ -96,14 +96,12 @@ private struct WelcomeView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 22) {
-                // Brand mark — app icon, with a soft cocoa-tinted shadow.
-                if let icon = NSApp.applicationIconImage {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 96, height: 96)
-                        .shadow(color: Brand.cocoa.opacity(0.28), radius: 14, y: 8)
-                }
+                // Brand mark — drawn in SwiftUI so it stays fully saturated
+                // (macOS Tahoe tints `NSApp.applicationIconImage` toward the
+                // window's label color, which washes out our brand palette).
+                BrandMark()
+                    .frame(width: 96, height: 96)
+                    .shadow(color: Brand.cocoa.opacity(0.28), radius: 14, y: 8)
 
                 VStack(spacing: 6) {
                     Text("Tiramisu")
@@ -233,6 +231,78 @@ private struct SecondaryButton: View {
         )
         .onHover { hovering = $0 }
     }
+}
+
+// MARK: - Brand mark
+
+/// SwiftUI rendering of the three-layer-slice app icon. Stays fully
+/// saturated regardless of window context (NSApp.applicationIconImage
+/// gets tinted by macOS Tahoe in non-dock surfaces).
+struct BrandMark: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let s = min(proxy.size.width, proxy.size.height)
+            let r = s * 0.22                // outer corner radius
+            let layerR = s * 0.043          // each layer's corner radius
+            let inset = s * 0.097           // horizontal inset for layers
+            let layerH = s * 0.187          // each layer's height
+            let layerSpacing = s * 0.022    // vertical gap between layers
+            let topY = s * 0.187            // top of the topmost layer
+
+            ZStack {
+                // Parchment plate
+                RoundedRectangle(cornerRadius: r, style: .continuous)
+                    .fill(Brand.mascarpone)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: r, style: .continuous)
+                            .strokeBorder(Brand.cocoa.opacity(0.16), lineWidth: max(1, s * 0.003))
+                    )
+
+                // Top layer — mascarpone rectangle with cocoa-dust dots
+                RoundedRectangle(cornerRadius: layerR, style: .continuous)
+                    .fill(Brand.mascarpone)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: layerR, style: .continuous)
+                            .strokeBorder(Brand.cocoa.opacity(0.20), lineWidth: max(0.5, s * 0.002))
+                    )
+                    .frame(width: s - inset * 2, height: layerH)
+                    .position(x: s / 2, y: topY + layerH / 2)
+
+                // Cocoa-dust dots
+                ZStack {
+                    ForEach(Array(BrandMark.dustDots.enumerated()), id: \.offset) { _, d in
+                        Circle()
+                            .fill(d.isAccent ? Brand.accent : Brand.cocoa.opacity(d.opacity))
+                            .frame(width: s * d.r, height: s * d.r)
+                            .position(x: s * d.x, y: s * d.y)
+                    }
+                }
+
+                // Middle layer — ladyfinger
+                RoundedRectangle(cornerRadius: layerR, style: .continuous)
+                    .fill(Brand.ladyfinger)
+                    .frame(width: s - inset * 2, height: layerH)
+                    .position(x: s / 2, y: topY + layerH + layerSpacing + layerH / 2)
+
+                // Bottom layer — espresso
+                RoundedRectangle(cornerRadius: layerR, style: .continuous)
+                    .fill(Brand.espresso)
+                    .frame(width: s - inset * 2, height: layerH)
+                    .position(x: s / 2, y: topY + (layerH + layerSpacing) * 2 + layerH / 2)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    private struct Dot { let x, y, r, opacity: CGFloat; let isAccent: Bool }
+    private static let dustDots: [Dot] = [
+        Dot(x: 0.281, y: 0.250, r: 0.0375, opacity: 0.70, isAccent: false),
+        Dot(x: 0.406, y: 0.237, r: 0.0312, opacity: 0.60, isAccent: false),
+        Dot(x: 0.422, y: 0.288, r: 0.0344, opacity: 1.00, isAccent: true),  // the orange one
+        Dot(x: 0.531, y: 0.256, r: 0.0344, opacity: 0.65, isAccent: false),
+        Dot(x: 0.656, y: 0.244, r: 0.0312, opacity: 0.60, isAccent: false),
+        Dot(x: 0.781, y: 0.262, r: 0.0281, opacity: 0.55, isAccent: false)
+    ]
 }
 
 // MARK: - Brand palette (mirrors tiramisu_www CSS variables)
