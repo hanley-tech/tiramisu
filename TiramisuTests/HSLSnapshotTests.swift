@@ -19,11 +19,6 @@ final class HSLSnapshotTests: XCTestCase {
         try renderHSL(name: "hsl-baseline", hsl: HSLAdjustments())
     }
 
-    func testRedSatBoost() throws {
-        var h = HSLAdjustments(); h.redSat = 1.0
-        try renderHSL(name: "hsl-red-sat-up", hsl: h)
-    }
-
     func testRedSatCut() throws {
         // Drives reds toward gray. Skin tones (mostly orange) should stay.
         var h = HSLAdjustments(); h.redSat = -1.0
@@ -37,11 +32,26 @@ final class HSLSnapshotTests: XCTestCase {
         try renderHSL(name: "hsl-aqua-lum-down", hsl: h)
     }
 
-    func testGreenHueShift() throws {
-        // Greens rotate toward yellow at full slider — foliage becomes
-        // yellow-green / olive.
-        var h = HSLAdjustments(); h.greenHue = 1.0
-        try renderHSL(name: "hsl-green-hue-shift", hsl: h)
+    func testRedHueShift() throws {
+        // Rotate the red macaw's plumage toward yellow/gold (Lightroom
+        // convention: negative red Hue → +60° → toward orange/yellow).
+        // Bright saturated content + a perceptually-distinct destination
+        // hue = unmistakable visible diff. Replaces the greenHue demo,
+        // which read as subtle on dark foliage even though the band-
+        // isolation test showed pixels migrating correctly.
+        var h = HSLAdjustments(); h.redHue = -1.0
+        try renderHSL(name: "hsl-red-hue-toward-gold", hsl: h)
+    }
+
+    func testFallFoliage() throws {
+        // Stacked move: rotate greens + yellows toward red, desaturate blues
+        // — the classic "summer to fall" recolor. Foliage goes orange, yellow
+        // macaw shifts toward orange/red. Demonstrates that HSL bands compose
+        // for full creative looks, not just per-band tweaks.
+        var h = HSLAdjustments()
+        h.greenHue = 1.0;   h.greenSat = 0.5
+        h.yellowHue = 1.0;  h.yellowSat = 0.3
+        try renderHSL(name: "hsl-fall-foliage", hsl: h)
     }
 
     func testYellowSatDown() throws {
@@ -51,15 +61,19 @@ final class HSLSnapshotTests: XCTestCase {
         try renderHSL(name: "hsl-yellow-sat-down", hsl: h)
     }
 
-    func testCombinedTeal() throws {
-        // Composite move: cool-and-teal — orange skin/plumage warmer, aqua
-        // plumage punchier, blues shifted. All sliders pushed hard for a
-        // full "look" rather than subtle correction.
+    func testCinematicGrade() throws {
+        // Full cinematic recolor — every band engaged at full intensity:
+        // warm reds, golden orange/yellow tones, deep teal/aqua, crushed
+        // blues. The classic "teal & orange" Hollywood grade pushed hard
+        // enough that the result is unmistakably different from baseline.
         var h = HSLAdjustments()
-        h.orangeSat = 0.8;  h.orangeLum = 0.3
-        h.aquaSat = 1.0;    h.aquaLum = 0.2
-        h.blueHue = -0.6;   h.blueSat = 0.8
-        try renderHSL(name: "hsl-teal-and-orange", hsl: h)
+        h.redHue = 0.3;     h.redSat = 0.5;     h.redLum = 0.1
+        h.orangeHue = -0.4; h.orangeSat = 1.0;  h.orangeLum = 0.3
+        h.yellowHue = -0.5; h.yellowSat = 0.4;  h.yellowLum = 0.2
+        h.greenSat = -0.8;  h.greenLum = -0.3
+        h.aquaHue = 0.4;    h.aquaSat = 1.0;    h.aquaLum = -0.2
+        h.blueHue = 0.5;    h.blueSat = 0.8;    h.blueLum = -0.6
+        try renderHSL(name: "hsl-cinematic-grade", hsl: h)
     }
 
     // MARK: - Helpers
