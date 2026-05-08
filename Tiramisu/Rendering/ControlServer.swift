@@ -335,8 +335,18 @@ final class ControlServer {
             case "warmth":     layer.adjust.warmth = val
             case "shadows":    layer.adjust.shadows = val
             case "highlights": layer.adjust.highlights = val
+            case "curveIntensity": layer.adjust.curveIntensity = val
             default: return httpResponse(status: 400, body: "Unknown adjust key '\(key)'")
             }
+            store.invalidate()
+        case "setCurve":
+            // {"preset":"gentleS"} — sets the active layer's curve preset by raw value.
+            guard let raw = obj["preset"] as? String,
+                  let preset = CurvePreset(rawValue: raw),
+                  let layer = store.activeLayer else {
+                return httpResponse(status: 400, body: "Need 'preset' (linear|gentleS|strongS|liftedShadows|crushedShadows) and active layer")
+            }
+            layer.adjust.curve = preset
             store.invalidate()
         case "setFilter":
             // {"key":"vignette","value":0.7} — sets a field on the active layer's

@@ -40,6 +40,35 @@ final class AdjustPresetSnapshotTests: XCTestCase {
                          adjustments: Adjustments(vibrance: -0.7))
     }
 
+    // MARK: - Curve presets
+
+    func testCurveGentleS() throws {
+        try renderAdjust(name: "curve-gentle-s",
+                         adjustments: Adjustments(curve: .gentleS, curveIntensity: 1.0))
+    }
+
+    func testCurveStrongS() throws {
+        try renderAdjust(name: "curve-strong-s",
+                         adjustments: Adjustments(curve: .strongS, curveIntensity: 1.0))
+    }
+
+    func testCurveLiftedShadows() throws {
+        try renderAdjust(name: "curve-lifted-shadows",
+                         adjustments: Adjustments(curve: .liftedShadows, curveIntensity: 1.0))
+    }
+
+    func testCurveCrushedShadows() throws {
+        try renderAdjust(name: "curve-crushed-shadows",
+                         adjustments: Adjustments(curve: .crushedShadows, curveIntensity: 1.0))
+    }
+
+    func testCurveHalfIntensity() throws {
+        // Strong-S at 50% intensity — verifies the lerp behavior between
+        // linear and the full preset, separately from the preset itself.
+        try renderAdjust(name: "curve-half-intensity",
+                         adjustments: Adjustments(curve: .strongS, curveIntensity: 0.5))
+    }
+
     // MARK: - Helpers
 
     private func renderPreset(id: String) throws {

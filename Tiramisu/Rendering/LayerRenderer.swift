@@ -109,7 +109,7 @@ enum LayerRenderer {
         // Filters / adjustments / relight / skin / styles
         let A = L.adjust; h.combine(A.brightness); h.combine(A.contrast); h.combine(A.exposure)
         h.combine(A.saturation); h.combine(A.warmth); h.combine(A.shadows); h.combine(A.highlights)
-        h.combine(A.vibrance)
+        h.combine(A.vibrance); h.combine(A.curve); h.combine(A.curveIntensity)
         let F = L.filters; h.combine(F.blur); h.combine(F.noise); h.combine(F.noiseMono)
         h.combine(F.sharpen); h.combine(F.pixelate); h.combine(F.hueShift)
         h.combine(F.vignette); h.combine(F.vignetteFalloff); h.combine(F.grain); h.combine(F.grainSize)
@@ -320,6 +320,22 @@ enum LayerRenderer {
             let f = CIFilter.vibrance()
             f.inputImage = out
             f.amount = Float(adj.vibrance)
+            out = f.outputImage ?? out
+        }
+        // Tone curve — preset shape lerped from linear by `curveIntensity`.
+        // CIToneCurve takes 5 control points; we interpolate each point's Y
+        // toward the preset's Y by intensity. At intensity=0 the curve is
+        // identity (no-op); at 1 it's the full preset.
+        if adj.curve != .linear && adj.curveIntensity > 0.001 {
+            let pts = adj.curve.points
+            let t = CGFloat(adj.curveIntensity)
+            let f = CIFilter.toneCurve()
+            f.inputImage = out
+            f.point0 = CGPoint(x: pts.0.x, y: pts.0.x + (pts.0.y - pts.0.x) * t)
+            f.point1 = CGPoint(x: pts.1.x, y: pts.1.x + (pts.1.y - pts.1.x) * t)
+            f.point2 = CGPoint(x: pts.2.x, y: pts.2.x + (pts.2.y - pts.2.x) * t)
+            f.point3 = CGPoint(x: pts.3.x, y: pts.3.x + (pts.3.y - pts.3.x) * t)
+            f.point4 = CGPoint(x: pts.4.x, y: pts.4.x + (pts.4.y - pts.4.x) * t)
             out = f.outputImage ?? out
         }
         return out

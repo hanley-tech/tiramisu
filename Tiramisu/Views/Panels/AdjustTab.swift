@@ -98,6 +98,25 @@ private struct LightingPanel: View {
                     adjRow("Shadows", \.shadows, -1...1)
                     adjRow("Highlights", \.highlights, -1...1)
 
+                    // Tone curve — preset picker + intensity. Interactive
+                    // graph editor lands in v0.4.
+                    InspectorRow("Curve") {
+                        Picker("", selection: Binding(
+                            get: { layer.adjust.curve },
+                            set: { layer.adjust.curve = $0; store.invalidate() }
+                        )) {
+                            ForEach(CurvePreset.allCases, id: \.self) { p in
+                                Text(p.label).tag(p)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                    if layer.adjust.curve != .linear {
+                        InspectorRow("C. intensity") {
+                            InspectorSlider($layer.adjust.curveIntensity, in: 0...1, format: .percent) { store.invalidate() }
+                        }
+                    }
+
                     HStack {
                         Spacer()
                         Button("Reset") {

@@ -5,6 +5,54 @@ import Observation
 
 enum LayerKind: String, Codable, Sendable { case raster, text, gradient, solid }
 
+/// Tone-curve preset shapes. Each one resolves to a 5-point control set
+/// for `CIToneCurve` at full intensity; the live render lerps between
+/// linear (identity) and the preset's points by `curveIntensity`.
+enum CurvePreset: String, Codable, Sendable, CaseIterable {
+    case linear            // identity — no-op
+    case gentleS           // mild contrast lift
+    case strongS           // dramatic contrast lift
+    case liftedShadows     // faded / film look
+    case crushedShadows    // dramatic shadow detail
+
+    var label: String {
+        switch self {
+        case .linear:         return "Linear"
+        case .gentleS:        return "Gentle S"
+        case .strongS:        return "Strong S"
+        case .liftedShadows:  return "Lifted shadows"
+        case .crushedShadows: return "Crushed shadows"
+        }
+    }
+
+    /// The 5 control points (x is input luma 0…1, y is output) at full
+    /// intensity. `linear` returns the identity curve.
+    var points: (CGPoint, CGPoint, CGPoint, CGPoint, CGPoint) {
+        switch self {
+        case .linear:
+            return (CGPoint(x: 0, y: 0), CGPoint(x: 0.25, y: 0.25),
+                    CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.75, y: 0.75),
+                    CGPoint(x: 1, y: 1))
+        case .gentleS:
+            return (CGPoint(x: 0, y: 0), CGPoint(x: 0.25, y: 0.20),
+                    CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.75, y: 0.80),
+                    CGPoint(x: 1, y: 1))
+        case .strongS:
+            return (CGPoint(x: 0, y: 0), CGPoint(x: 0.25, y: 0.13),
+                    CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.75, y: 0.87),
+                    CGPoint(x: 1, y: 1))
+        case .liftedShadows:
+            return (CGPoint(x: 0, y: 0.10), CGPoint(x: 0.25, y: 0.30),
+                    CGPoint(x: 0.5, y: 0.55), CGPoint(x: 0.75, y: 0.78),
+                    CGPoint(x: 1, y: 1))
+        case .crushedShadows:
+            return (CGPoint(x: 0, y: 0), CGPoint(x: 0.25, y: 0.10),
+                    CGPoint(x: 0.5, y: 0.45), CGPoint(x: 0.75, y: 0.80),
+                    CGPoint(x: 1, y: 0.95))
+        }
+    }
+}
+
 struct Adjustments: Codable, Sendable, Equatable {
     var brightness: Double = 0   // -1...1
     var contrast: Double = 0     // -1...1
@@ -16,17 +64,26 @@ struct Adjustments: Codable, Sendable, Equatable {
     /// "Smart" saturation that protects already-saturated pixels and skin tones —
     /// boosts low-saturation regions more than high-saturation ones. Lightroom-style.
     var vibrance: Double = 0     // -1...1
+    /// Tone-curve preset. Combined with `curveIntensity` the live render lerps
+    /// from linear (identity) to the preset's full curve. Lets us ship
+    /// photographer-grade tonal control today; an interactive draggable
+    /// graph editor lands in v0.4.
+    var curve: CurvePreset = .linear
+    var curveIntensity: Double = 1   // 0...1
 
     enum CodingKeys: String, CodingKey {
         case brightness, contrast, exposure, saturation, warmth, shadows, highlights, vibrance
+        case curve, curveIntensity
     }
     init() {}
     init(brightness: Double = 0, contrast: Double = 0, exposure: Double = 0,
          saturation: Double = 0, warmth: Double = 0, shadows: Double = 0,
-         highlights: Double = 0, vibrance: Double = 0) {
+         highlights: Double = 0, vibrance: Double = 0,
+         curve: CurvePreset = .linear, curveIntensity: Double = 1) {
         self.brightness = brightness; self.contrast = contrast; self.exposure = exposure
         self.saturation = saturation; self.warmth = warmth
         self.shadows = shadows; self.highlights = highlights; self.vibrance = vibrance
+        self.curve = curve; self.curveIntensity = curveIntensity
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -38,6 +95,8 @@ struct Adjustments: Codable, Sendable, Equatable {
         self.shadows    = try c.decodeIfPresent(Double.self, forKey: .shadows) ?? 0
         self.highlights = try c.decodeIfPresent(Double.self, forKey: .highlights) ?? 0
         self.vibrance   = try c.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
+        self.curve = try c.decodeIfPresent(CurvePreset.self, forKey: .curve) ?? .linear
+        self.curveIntensity = try c.decodeIfPresent(Double.self, forKey: .curveIntensity) ?? 1
     }
 }
 
