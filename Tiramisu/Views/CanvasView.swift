@@ -5,10 +5,18 @@ import UniformTypeIdentifiers
 struct CanvasView: View {
     @Environment(DocumentStore.self) private var store
 
+    /// Internal margin between the canvas image and the surrounding chrome
+    /// (toolbar / status bar / sidebar / inspector). Lives inside CanvasView
+    /// so the checkerboard background fills the whole canvas-area instead of
+    /// leaving blank strips of parent color around the edges.
+    private let canvasMargin: CGFloat = 24
+
     var body: some View {
         GeometryReader { proxy in
-            let fit = min(proxy.size.width / store.canvasSize.width,
-                          proxy.size.height / store.canvasSize.height)
+            let fitW = max(1, proxy.size.width  - canvasMargin * 2)
+            let fitH = max(1, proxy.size.height - canvasMargin * 2)
+            let fit = min(fitW / store.canvasSize.width,
+                          fitH / store.canvasSize.height)
             let scale = max(0.05, min(8, fit * store.viewportZoom))
             let dw = store.canvasSize.width * scale
             let dh = store.canvasSize.height * scale
@@ -42,18 +50,23 @@ struct CanvasView: View {
                         }
                     }
 
-                // Transform handles fill the entire stage, so they never clip at the
-                // canvas edge regardless of scale or position. The overlay needs to
-                // know where the image sits inside the stage — and that origin
-                // shifts with the viewport pan so handles track the panned image.
+                // Transform handles draw on a "stage" that's at least as large as
+                // the zoomed image plus a handle-padding margin. SwiftUI Canvas
+                // clips to its frame, so a viewport-sized overlay would lose
+                // handles at zoom > 1 (the image extends past the viewport). The
+                // outer ZStack gets `.clipped()` in MainWindow so overflow stays
+                // inside the canvas area.
+                let handlePad: CGFloat = 60
+                let stageW = max(proxy.size.width, dw) + handlePad * 2
+                let stageH = max(proxy.size.height, dh) + handlePad * 2
                 TransformOverlay(
                     docToView: scale,
                     imageOrigin: CGPoint(
-                        x: (proxy.size.width - dw) / 2 + store.viewportPan.width,
-                        y: (proxy.size.height - dh) / 2 + store.viewportPan.height
+                        x: (stageW - dw) / 2 + store.viewportPan.width,
+                        y: (stageH - dh) / 2 + store.viewportPan.height
                     )
                 )
-                .frame(width: proxy.size.width, height: proxy.size.height)
+                .frame(width: stageW, height: stageH)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Two-finger trackpad pan — caught by the NSView at the back of
@@ -74,9 +87,6 @@ struct CanvasView: View {
             )
             .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
                 handleDrop(providers: providers)
-            }
-            .overlay(alignment: .bottomLeading) {
-                ZoomHUD().padding(12)
             }
         }
     }
@@ -147,28 +157,33 @@ struct CanvasView: View {
     }
 }
 
-private struct ZoomHUD: View {
+/// Zoom controls + readout — lives in the canvas status bar (below the canvas
+/// area), so it never overlaps the rendered image. No glass; reads as chrome.
+struct ZoomHUD: View {
     @Environment(DocumentStore.self) private var store
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Button {
                 store.viewportZoom = max(0.05, store.viewportZoom / 1.25)
                 store.viewportZoomBase = store.viewportZoom
             } label: { Image(systemName: "minus.magnifyingglass") }
+                .help("Zoom out")
             Text("\(Int(store.viewportZoom * 100))%")
-                .font(.caption.monospacedDigit())
-                .frame(width: 44)
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 40)
             Button {
                 store.viewportZoom = min(8, store.viewportZoom * 1.25)
                 store.viewportZoomBase = store.viewportZoom
             } label: { Image(systemName: "plus.magnifyingglass") }
+                .help("Zoom in")
             Button("Fit") {
                 store.viewportZoom = 1; store.viewportZoomBase = 1
             }
+            .help("Reset to fit")
         }
         .buttonStyle(.borderless)
-        .padding(.vertical, 6).padding(.horizontal, 8)
-        .glassEffect(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .controlSize(.small)
     }
 }
 

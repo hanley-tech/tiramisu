@@ -79,10 +79,12 @@ struct TransformOverlay: View {
     private func textBBoxDoc(layer: PXLayer) -> CGRect? {
         var b = layer.text.lastRenderedBounds
         guard b.width > 0 && b.height > 0 else { return nil }
-        // lastRenderedBounds is stored assuming anchor = (0.5, 0.5). Shift to
-        // match the current anchor.
-        let dx = (layer.text.anchorX - 0.5) * store.canvasSize.width
-        let dy = (layer.text.anchorY - 0.5) * store.canvasSize.height
+        // lastRenderedBounds is stored assuming anchor = (0.5, 0.5) AND
+        // offset = (0, 0). The renderer applies both as a translation at
+        // composite time (see LayerRenderer.composite), so we have to
+        // mirror that here so the bbox tracks where the text actually drew.
+        let dx = (layer.text.anchorX - 0.5) * store.canvasSize.width + layer.offset.width
+        let dy = (layer.text.anchorY - 0.5) * store.canvasSize.height + layer.offset.height
         b.origin.x += dx
         b.origin.y += dy
         return b
