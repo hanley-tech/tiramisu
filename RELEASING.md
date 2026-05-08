@@ -33,13 +33,16 @@ git push origin v0.2.0
 # 5. Build, sign, notarize, package, publish
 ./scripts/release.sh v0.2.0
 
-# 6. Update the marketing site — roadmap + releases page
+# 6. Update the marketing site — roadmap + releases + visual snapshots
 cd ../tiramisu_www
-$EDITOR roadmap.html   # mark items shipped, bump shipped counter
-$EDITOR releases.html  # add a new <div class="release latest"> block at the top
-                       # (and remove the .latest class from the previous one)
-git commit -am "Site: vX.Y.Z roadmap + release notes"
-git push origin main   # rsync→Lightsail picks it up
+$EDITOR roadmap.html         # mark items shipped, bump shipped counter
+$EDITOR releases.html        # add a new <div class="release latest"> block at the top
+                             # (and remove the .latest class from the previous one)
+./scripts/sync-snapshots.sh  # mirror passing test goldens to tests/snapshots/
+                             # (LFS-tracked — doesn't bloat git history)
+git add -A
+git commit -m "Site: vX.Y.Z roadmap + release notes + snapshots"
+git push origin main         # rsync→Lightsail picks it up
 
 # Done. tiramisu.hanley.world/download now serves the new DMG.
 ```
@@ -123,7 +126,24 @@ public-facing, links from the homepage. After every release:
 5. Update the top counter
    (`<div class="summary-cell shipped"><div class="n">…</div></div>`)
 
-### 5b. Release notes page
+### 5b. Visual snapshot gallery (quality.html)
+
+`tiramisu_www/quality.html` displays every passing snapshot golden as a
+live gallery — proof of pipeline stability, doubles as marketing.
+Snapshots are LFS-tracked under `tiramisu_www/tests/snapshots/`; the
+sync script mirrors them from the app repo's `__Snapshots__` dir.
+
+```bash
+./scripts/sync-snapshots.sh   # in tiramisu_www
+```
+
+The script writes `tests/snapshots/index.json` with the file list +
+generation timestamp + source git commit. `quality.html` fetches that
+manifest at runtime and renders the grid, grouped by test class. No
+manual HTML edit needed per release — adding new snapshot tests
+automatically populates the page after the next sync.
+
+### 5c. Release notes page
 
 `tiramisu_www/releases.html` tells the *story* of each version (the
 roadmap shows current state — this shows how we got here). After every
