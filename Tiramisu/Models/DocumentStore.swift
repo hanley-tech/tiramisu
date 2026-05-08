@@ -11,6 +11,13 @@ final class DocumentStore {
     var layers: [PXLayer] = []
     var activeLayerID: UUID?
     var tool: Tool = .move
+    /// When non-nil, the canvas drag handler enters HSL Targeted-Adjustment-Tool
+    /// mode: clicking the photo samples the pixel under the cursor, identifies
+    /// which 1-2 hue bands it belongs to, and a vertical drag scrubs those
+    /// bands' slider for the channel set here. Set from the Adjust → Color
+    /// (HSL) panel; cleared by clicking the TAT button again or pressing Esc.
+    /// Transient — never persisted to disk.
+    var hslTATChannel: HSLTATChannel? = nil
     var foreground: ColorRGB = ColorRGB(r: 1.0, g: 0.8, b: 0.0)
     var brush = BrushSettings()
     var currentFileURL: URL?
@@ -311,6 +318,9 @@ final class DocumentStore {
         invalidate()
     }
 }
+
+/// Which HSL channel the Targeted Adjustment Tool is currently scrubbing.
+enum HSLTATChannel: String, Sendable { case hue, sat, lum }
 
 enum Tool: String, CaseIterable, Sendable {
     case move, marquee, pencil, pen, eraser, text, eyedropper, relight

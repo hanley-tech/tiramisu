@@ -214,6 +214,15 @@ private struct HSLPanel: View {
     private var activeChannel: HSLChannel {
         switch tab { case "sat": return .sat; case "lum": return .lum; default: return .hue }
     }
+    /// Bridge from the panel's local channel enum to the store-level enum
+    /// used by the canvas TAT drag handler.
+    private var activeChannelEnum: HSLTATChannel {
+        switch activeChannel {
+        case .hue: return .hue
+        case .sat: return .sat
+        case .lum: return .lum
+        }
+    }
 
     /// Hue centers in degrees match the renderer's band order.
     private struct ColorBand: Identifiable {
@@ -246,13 +255,41 @@ private struct HSLPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("", selection: $tab) {
-                Text("Hue").tag("hue")
-                Text("Saturation").tag("sat")
-                Text("Luminance").tag("lum")
+            HStack(spacing: 8) {
+                Picker("", selection: $tab) {
+                    Text("Hue").tag("hue")
+                    Text("Saturation").tag("sat")
+                    Text("Luminance").tag("lum")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: tab) {
+                    // Switching sub-tabs while TAT was on a different channel
+                    // would silently scrub the wrong channel. Auto-deactivate
+                    // so the visible scope state always matches what's active.
+                    if store.hslTATChannel != nil {
+                        store.hslTATChannel = nil
+                    }
+                }
+                // Targeted Adjustment Tool — Lightroom's "click on the photo
+                // and drag" feature. Active state mirrors store.hslTATChannel.
+                Button {
+                    if store.hslTATChannel == activeChannelEnum {
+                        store.hslTATChannel = nil
+                    } else {
+                        store.hslTATChannel = activeChannelEnum
+                    }
+                } label: {
+                    Image(systemName: store.hslTATChannel == activeChannelEnum
+                        ? "scope.fill" : "scope")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 22, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(store.hslTATChannel == activeChannelEnum
+                    ? Color.accentColor : .secondary)
+                .help("Targeted adjustment — click on the photo and drag up/down to scrub the band under the cursor for the active sub-tab.")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
 
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Self.bands) { band in
@@ -284,6 +321,9 @@ private struct HSLPanel: View {
     }
 
     private var footnoteForActiveTab: String {
+        if store.hslTATChannel == activeChannelEnum {
+            return "Targeted adjustment active — click and drag up/down on the photo to scrub the band under the cursor. Click the scope again to deactivate."
+        }
         switch activeChannel {
         case .hue: return "Rotate each band's hue ±60° toward neighboring colors. Reds → magenta or orange; greens → yellow or aqua. Double-click to reset."
         case .sat: return "Push each band toward gray (-1) or full color (+1) without touching other colors. Double-click to reset."

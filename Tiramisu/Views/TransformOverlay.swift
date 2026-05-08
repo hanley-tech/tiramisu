@@ -8,6 +8,7 @@ struct TransformOverlay: View {
 
     @State private var dragStart: DragStart?
     @State private var missStart: CGPoint?
+    @State private var tatStart: TATStart?
 
     private struct DragStart {
         enum Kind { case move, cornerTL, cornerTR, cornerBL, cornerBR, rotate }
@@ -17,6 +18,19 @@ struct TransformOverlay: View {
         let startScaleY: Double
         let startRotation: Double
         let startMouseDoc: CGPoint
+    }
+
+    /// Snapshot of the HSL TAT click — captured on mouse-down so the drag
+    /// applies a consistent delta to the bands the click landed on.
+    private struct TATStart {
+        let startMouseY: CGFloat
+        let channel: HSLTATChannel
+        /// Up to two band indices (into HSLAdjustments' fixed band order)
+        /// with weights summing to 1.
+        let bandWeights: [(idx: Int, weight: Double)]
+        /// Each affected band's slider value at the moment of click; we
+        /// add `delta * weight` to this throughout the drag.
+        let startValues: [Int: Double]
     }
 
     var body: some View {
@@ -66,6 +80,14 @@ struct TransformOverlay: View {
         }
         .contentShape(Rectangle())
         .gesture(dragGesture)
+        // Crosshair cursor + Esc-to-exit when HSL TAT mode is active.
+        // Without the cursor change users can't tell they're in a different
+        // interaction mode; without Esc the only way out is the scope
+        // button on the panel which may be off-screen during a drag session.
+        .background(TATCursorOverlay(active: store.hslTATChannel != nil))
+        .background(TATKeyHandler(active: store.hslTATChannel != nil) {
+            store.hslTATChannel = nil
+        })
     }
 
     private func bboxDoc(smart: SmartSource) -> CGRect {
@@ -119,6 +141,15 @@ struct TransformOverlay: View {
             .onChanged { value in
                 let docP = CGPoint(x: (value.location.x - imageOrigin.x) / docToView,
                                    y: (value.location.y - imageOrigin.y) / docToView)
+
+                // HSL Targeted Adjustment Tool — runs before any tool branch
+                // so it works regardless of the active sidebar tool. Click
+                // anywhere on the photo, drag up/down to scrub the band(s)
+                // under the cursor for the active sub-tab.
+                if let tatChan = store.hslTATChannel {
+                    handleTATDrag(value: value, docP: docP, channel: tatChan)
+                    return
+                }
 
                 if store.tool == .marquee {
                     // Drag draws a selection rect. Start point = where missStart was set.
@@ -284,6 +315,7 @@ struct TransformOverlay: View {
                 }
                 dragStart = nil
                 missStart = nil
+                tatStart = nil
             }
     }
 
@@ -328,5 +360,289 @@ struct TransformOverlay: View {
         }
         if b.insetBy(dx: -hitRadius, dy: -hitRadius).contains(p) { return .move }
         return nil
+    }
+
+    // MARK: - HSL Targeted Adjustment Tool
+
+    /// Hue centers in degrees, in the same fixed band order used by
+    /// `HSLAdjustments.asDeltaTable` and the renderer's LUT generator.
+    private static let tatHueCenters: [Double] = [0, 30, 60, 120, 180, 240, 270, 300]
+
+    private func handleTATDrag(value: DragGesture.Value, docP: CGPoint, channel: HSLTATChannel) {
+        guard let layer = store.activeLayer else { return }
+
+        // First call in this drag — sample pixel, compute band weights, snapshot
+        // current slider values, take an undo checkpoint.
+        if tatStart == nil {
+            // Composite the document and sample the pixel under the click. We
+            // compose once on click (not per-frame); the band weights stay
+            // fixed for the whole drag so the target doesn't chase its tail.
+            guard let cg = LayerRenderer.composite(store: store) else { return }
+            let px = Int(docP.x.rounded())
+            let py = Int(docP.y.rounded())
+            guard px >= 0, px < cg.width, py >= 0, py < cg.height else { return }
+            guard let (r, g, b) = sampleSRGB(cg: cg, x: px, y: py) else { return }
+            let (hueNorm, sat, _) = rgbToHSV(r: r, g: g, b: b)
+            // Pure-gray pixels have undefined hue; nothing to target.
+            guard sat > 0.05 else {
+                store.checkpoint("HSL TAT (no-op)")  // still take a checkpoint so canceling deactivation feels symmetric
+                return
+            }
+
+            let weights = bandWeights(forHueDeg: hueNorm * 360)
+            var startVals: [Int: Double] = [:]
+            for (idx, _) in weights {
+                startVals[idx] = hslSliderValue(layer.adjust.hsl, bandIdx: idx, channel: channel)
+            }
+            store.checkpoint("HSL Targeted Adjust")
+            tatStart = TATStart(startMouseY: value.location.y,
+                                channel: channel,
+                                bandWeights: weights,
+                                startValues: startVals)
+            return
+        }
+
+        // Subsequent calls — apply delta. Up = positive (Lightroom muscle
+        // memory: drag up to increase, drag down to decrease).
+        let dy = tatStart!.startMouseY - value.location.y
+        let delta = Double(dy) / 200.0   // 200 px = full ±1 slider
+        for (idx, weight) in tatStart!.bandWeights {
+            let start = tatStart!.startValues[idx] ?? 0
+            let new = max(-1, min(1, start + delta * weight))
+            setHSLSliderValue(&layer.adjust.hsl, bandIdx: idx, channel: tatStart!.channel, value: new)
+        }
+        store.invalidate()
+    }
+
+    /// Linear interpolation in hue between adjacent band centers — same
+    /// semantics as the renderer's LUT generator. Returns 1-2 entries.
+    private func bandWeights(forHueDeg hueDeg: Double) -> [(idx: Int, weight: Double)] {
+        let centers = Self.tatHueCenters
+        let n = centers.count
+        for i in 0..<n {
+            let cA = centers[i]
+            let cB = centers[(i + 1) % n]
+            let span = (cB - cA + 360).truncatingRemainder(dividingBy: 360)
+            let dist = (hueDeg - cA + 360).truncatingRemainder(dividingBy: 360)
+            if dist < span || (dist == 0 && i == 0) {
+                let t = span > 0 ? dist / span : 0
+                return [(i, 1 - t), ((i + 1) % n, t)]
+            }
+        }
+        return [(0, 1.0)]
+    }
+
+    /// Sample a single sRGB pixel from a CGImage at integer (x, y) — top-left
+    /// origin. Decouples us from the source bitmap's color space + byte order
+    /// by drawing the 1×1 cropped tile into a known sRGB RGBA8 context.
+    private func sampleSRGB(cg: CGImage, x: Int, y: Int) -> (r: Double, g: Double, b: Double)? {
+        let crop = cg.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) ?? cg
+        var bytes: [UInt8] = [0, 0, 0, 0]
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        return bytes.withUnsafeMutableBufferPointer { buf -> (Double, Double, Double)? in
+            guard let ctx = CGContext(data: buf.baseAddress, width: 1, height: 1,
+                                      bitsPerComponent: 8, bytesPerRow: 4,
+                                      space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                return nil
+            }
+            ctx.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return (Double(buf[0]) / 255, Double(buf[1]) / 255, Double(buf[2]) / 255)
+        }
+    }
+
+    private func rgbToHSV(r: Double, g: Double, b: Double) -> (h: Double, s: Double, v: Double) {
+        let maxC = max(r, max(g, b))
+        let minC = min(r, min(g, b))
+        let delta = maxC - minC
+        let v = maxC
+        let s = maxC > 0 ? delta / maxC : 0
+        var h: Double = 0
+        if delta > 0 {
+            if maxC == r {
+                h = ((g - b) / delta).truncatingRemainder(dividingBy: 6)
+            } else if maxC == g {
+                h = (b - r) / delta + 2
+            } else {
+                h = (r - g) / delta + 4
+            }
+            h /= 6
+            if h < 0 { h += 1 }
+        }
+        return (h, s, v)
+    }
+
+    private func hslSliderValue(_ hsl: HSLAdjustments, bandIdx idx: Int, channel: HSLTATChannel) -> Double {
+        let row = hsl.asDeltaTable[idx]
+        switch channel {
+        case .hue: return row.h
+        case .sat: return row.s
+        case .lum: return row.l
+        }
+    }
+
+    private func setHSLSliderValue(_ hsl: inout HSLAdjustments, bandIdx idx: Int, channel: HSLTATChannel, value: Double) {
+        // Mirror of asDeltaTable's order: red, orange, yellow, green, aqua,
+        // blue, purple, magenta. Branch on channel + idx — verbose but cheap
+        // and clearer than building a table of WritableKeyPaths.
+        switch (idx, channel) {
+        case (0, .hue): hsl.redHue = value
+        case (0, .sat): hsl.redSat = value
+        case (0, .lum): hsl.redLum = value
+        case (1, .hue): hsl.orangeHue = value
+        case (1, .sat): hsl.orangeSat = value
+        case (1, .lum): hsl.orangeLum = value
+        case (2, .hue): hsl.yellowHue = value
+        case (2, .sat): hsl.yellowSat = value
+        case (2, .lum): hsl.yellowLum = value
+        case (3, .hue): hsl.greenHue = value
+        case (3, .sat): hsl.greenSat = value
+        case (3, .lum): hsl.greenLum = value
+        case (4, .hue): hsl.aquaHue = value
+        case (4, .sat): hsl.aquaSat = value
+        case (4, .lum): hsl.aquaLum = value
+        case (5, .hue): hsl.blueHue = value
+        case (5, .sat): hsl.blueSat = value
+        case (5, .lum): hsl.blueLum = value
+        case (6, .hue): hsl.purpleHue = value
+        case (6, .sat): hsl.purpleSat = value
+        case (6, .lum): hsl.purpleLum = value
+        case (7, .hue): hsl.magentaHue = value
+        case (7, .sat): hsl.magentaSat = value
+        case (7, .lum): hsl.magentaLum = value
+        default: break
+        }
+    }
+}
+
+// MARK: - TAT cursor + key bindings
+
+/// Backs an NSTrackingArea on the canvas overlay so the cursor switches to
+/// crosshair while HSL TAT mode is active and back to default when not.
+private struct TATCursorOverlay: NSViewRepresentable {
+    let active: Bool
+
+    func makeNSView(context: Context) -> CursorView {
+        CursorView()
+    }
+
+    func updateNSView(_ nsView: CursorView, context: Context) {
+        nsView.active = active
+        nsView.window?.invalidateCursorRects(for: nsView)
+    }
+
+    /// Custom cursor rendered from the same SF Symbol as the panel scope
+    /// button so the in-canvas cursor visually matches the button. Follows
+    /// macOS cursor convention: black glyph (the body), white halo behind
+    /// it for contrast against any photo content. Built once, cached.
+    private static let scopeCursor: NSCursor = {
+        let symbolName = "scope"
+        // White halo — slightly larger, heavy weight, drawn first.
+        let haloConfig = NSImage.SymbolConfiguration(pointSize: 22, weight: .heavy)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor.white]))
+        let halo = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(haloConfig)
+        // Black core glyph — drawn on top.
+        let coreConfig = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor.black]))
+        let core = NSImage(systemSymbolName: symbolName,
+                           accessibilityDescription: "Targeted adjustment")?
+            .withSymbolConfiguration(coreConfig)
+
+        let canvas = NSSize(width: 28, height: 28)
+        let bitmap = NSImage(size: canvas, flipped: false) { _ in
+            if let halo {
+                let s = halo.size
+                halo.draw(in: NSRect(x: (canvas.width - s.width) / 2,
+                                     y: (canvas.height - s.height) / 2,
+                                     width: s.width, height: s.height))
+            }
+            if let core {
+                let s = core.size
+                core.draw(in: NSRect(x: (canvas.width - s.width) / 2,
+                                     y: (canvas.height - s.height) / 2,
+                                     width: s.width, height: s.height))
+            }
+            return true
+        }
+        return NSCursor(image: bitmap, hotSpot: NSPoint(x: 14, y: 14))
+    }()
+
+    final class CursorView: NSView {
+        var active: Bool = false {
+            didSet {
+                window?.invalidateCursorRects(for: self)
+                needsDisplay = true
+            }
+        }
+        private var trackingArea: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let t = trackingArea { removeTrackingArea(t) }
+            let opts: NSTrackingArea.Options = [.activeInKeyWindow,
+                                                .mouseEnteredAndExited,
+                                                .mouseMoved,
+                                                .cursorUpdate,
+                                                .inVisibleRect]
+            let area = NSTrackingArea(rect: .zero, options: opts, owner: self, userInfo: nil)
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func cursorUpdate(with event: NSEvent) {
+            if active { TATCursorOverlay.scopeCursor.set() } else { super.cursorUpdate(with: event) }
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            if active { TATCursorOverlay.scopeCursor.set() }
+        }
+
+        // Don't intercept clicks — the gesture handler above us must still get them.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// Installs a local NSEvent monitor that consumes the Escape key while
+/// active. Used to dismiss HSL TAT mode without forcing the user back to
+/// the inspector to click the scope button.
+private struct TATKeyHandler: NSViewRepresentable {
+    let active: Bool
+    let onEscape: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.update(active: active, onEscape: onEscape)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        private var monitor: Any?
+        private var onEscape: () -> Void = {}
+
+        func update(active: Bool, onEscape: @escaping () -> Void) {
+            self.onEscape = onEscape
+            if active && monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                    guard let self else { return event }
+                    if event.keyCode == 53 {  // Escape
+                        self.onEscape()
+                        return nil
+                    }
+                    return event
+                }
+            } else if !active, let m = monitor {
+                NSEvent.removeMonitor(m)
+                monitor = nil
+            }
+        }
+
+        deinit {
+            if let m = monitor { NSEvent.removeMonitor(m) }
+        }
     }
 }
