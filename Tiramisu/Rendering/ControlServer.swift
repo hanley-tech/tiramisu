@@ -319,6 +319,45 @@ final class ControlServer {
                 return httpResponse(status: 500, body: "Expand failed: \(threwError)")
             }
             return jsonResponse(["ok": true])
+        case "setAdjust":
+            // {"key":"vibrance","value":0.7} — sets a field on the active layer's
+            // Adjustments. Used for headless verification of UI-bound sliders.
+            guard let key = obj["key"] as? String, let val = obj["value"] as? Double,
+                  let layer = store.activeLayer else {
+                return httpResponse(status: 400, body: "Need 'key' and 'value', and an active layer")
+            }
+            switch key {
+            case "brightness": layer.adjust.brightness = val
+            case "contrast":   layer.adjust.contrast = val
+            case "exposure":   layer.adjust.exposure = val
+            case "saturation": layer.adjust.saturation = val
+            case "vibrance":   layer.adjust.vibrance = val
+            case "warmth":     layer.adjust.warmth = val
+            case "shadows":    layer.adjust.shadows = val
+            case "highlights": layer.adjust.highlights = val
+            default: return httpResponse(status: 400, body: "Unknown adjust key '\(key)'")
+            }
+            store.invalidate()
+        case "setFilter":
+            // {"key":"vignette","value":0.7} — sets a field on the active layer's
+            // Filters. Mirror of setAdjust but for the filter chain.
+            guard let key = obj["key"] as? String, let val = obj["value"] as? Double,
+                  let layer = store.activeLayer else {
+                return httpResponse(status: 400, body: "Need 'key' and 'value', and an active layer")
+            }
+            switch key {
+            case "blur":            layer.filters.blur = val
+            case "noise":           layer.filters.noise = val
+            case "sharpen":         layer.filters.sharpen = val
+            case "pixelate":        layer.filters.pixelate = val
+            case "hueShift":        layer.filters.hueShift = val
+            case "vignette":        layer.filters.vignette = val
+            case "vignetteFalloff": layer.filters.vignetteFalloff = val
+            case "grain":           layer.filters.grain = val
+            case "grainSize":       layer.filters.grainSize = val
+            default: return httpResponse(status: 400, body: "Unknown filter key '\(key)'")
+            }
+            store.invalidate()
         case "showWelcome":
             WelcomeWindow.show(forced: true)
         case "setZoom":

@@ -204,13 +204,20 @@ enum LayerRenderer {
 
         // Vignette — radial darkening at the edges. CIVignetteEffect centers
         // on the canvas; intensity scales 0...1, falloff scales 0...1.
+        // Mask the result to the input layer's alpha so vignette only darkens
+        // pixels the layer actually drew (otherwise it'd show through to the
+        // background through transparent regions of the layer).
         if layer.filters.vignette > 0.001 {
             let f = CIFilter.vignetteEffect()
             f.inputImage = img
             f.center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
             f.radius = Float(min(canvasSize.width, canvasSize.height) * 0.5 * layer.filters.vignetteFalloff + min(canvasSize.width, canvasSize.height) * 0.25)
             f.intensity = Float(layer.filters.vignette)
-            if let out = f.outputImage { img = out.cropped(to: extent) }
+            if let out = f.outputImage {
+                img = out.applyingFilter("CISourceInCompositing", parameters: [
+                    "inputBackgroundImage": img
+                ]).cropped(to: extent)
+            }
         }
 
         // Grain — anisotropic noise overlay distinct from the flat `noise`
@@ -339,8 +346,16 @@ enum LayerRenderer {
         let random = CIFilter.randomGenerator()
         guard var grain = random.outputImage else { return img }
         // Scale the noise field so each grain particle is `size` pixels wide.
+        // Anchor the scale at the canvas center — naïve `scaleX: size, y: size`
+        // anchors at CI's lower-left origin, which makes the grain pattern look
+        // visually "stretched from the corner" at larger sizes.
         if size > 1.01 {
-            grain = grain.transformed(by: CGAffineTransform(scaleX: size, y: size))
+            let cx = extent.midX
+            let cy = extent.midY
+            let t = CGAffineTransform(translationX: -cx, y: -cy)
+                .concatenating(CGAffineTransform(scaleX: size, y: size))
+                .concatenating(CGAffineTransform(translationX: cx, y: cy))
+            grain = grain.transformed(by: t)
         }
         // Desaturate to monochrome luma — film grain is ~achromatic.
         let mono = CIFilter.colorMatrix()
@@ -367,7 +382,13 @@ enum LayerRenderer {
         let blend = CIFilter.multiplyBlendMode()
         blend.inputImage = lumaGrain
         blend.backgroundImage = img
-        return (blend.outputImage ?? img).cropped(to: extent)
+        let grained = blend.outputImage ?? img
+        // Mask the grained result to the input layer's alpha so transparent
+        // regions of the layer don't get filled with grey-noise (which would
+        // bleed across the whole canvas and obscure layers below).
+        return grained.applyingFilter("CISourceInCompositing", parameters: [
+            "inputBackgroundImage": img
+        ]).cropped(to: extent)
     }
 
     static func addNoise(_ img: CIImage, amount: Double, mono: Bool, extent: CGRect) -> CIImage {
@@ -385,8 +406,14 @@ enum LayerRenderer {
         let blend = CIFilter.colorMatrix()
         blend.inputImage = noise
         blend.aVector = CIVector(x: 0, y: 0, z: 0, w: amount)
-        let layer = blend.outputImage?.cropped(to: extent) ?? noise
-        return layer.composited(over: img).cropped(to: extent)
+        let noiseLayer = blend.outputImage?.cropped(to: extent) ?? noise
+        let composited = noiseLayer.composited(over: img)
+        // Mask to the source layer's alpha so the noise overlay doesn't extend
+        // past the layer's actual content into transparent regions (which would
+        // bleed the noise across the canvas, obscuring layers below).
+        return composited.applyingFilter("CISourceInCompositing", parameters: [
+            "inputBackgroundImage": img
+        ]).cropped(to: extent)
     }
 
     private static func compositeBlend(top: CIImage, bottom: CIImage, mode: BlendMode) -> CIImage {
