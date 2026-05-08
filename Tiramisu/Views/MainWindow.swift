@@ -19,6 +19,9 @@ struct MainWindow: View {
                     CanvasView()
                         .padding(24)
                 }
+                .clipped()  // keep transform-handle overflow from bleeding into toolbar/status bar
+                Divider()
+                CanvasStatusBar()
             }
             .inspector(isPresented: $showingInspector) {
                 InspectorView()
@@ -32,6 +35,26 @@ struct MainWindow: View {
     private var titleText: String {
         let base = store.currentFileURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
         return store.isDirty ? "\(base) — Edited" : base
+    }
+}
+
+/// Bottom status strip below the canvas. Holds zoom controls (left) and
+/// document size readout (right). Lives outside the canvas area so it
+/// never overlaps content — Photoshop / Pixelmator pattern.
+private struct CanvasStatusBar: View {
+    @Environment(DocumentStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZoomHUD()
+            Spacer()
+            Text("\(Int(store.canvasSize.width)) × \(Int(store.canvasSize.height))")
+                .font(.system(size: 11, weight: .regular).monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 26)
+        .background(.bar)
     }
 }
 
