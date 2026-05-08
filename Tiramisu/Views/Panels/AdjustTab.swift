@@ -304,8 +304,14 @@ private struct HSLPanel: View {
     static func gradient(forBand hueDeg: Double, channel: HSLChannel) -> LinearGradient {
         switch channel {
         case .hue:
-            // Sweep 60° centered on the band — magenta→red→orange for Red, etc.
-            let stops: [Color] = stride(from: -30.0, through: 30.0, by: 15.0).map { d in
+            // Sweep 60° centered on the band, with the rotation direction
+            // matching the renderer (positive slider = lower hue degrees).
+            // Red Hue's track reads magenta→red→orange left-to-right BUT the
+            // slider thumb at the right edge sits over the *magenta* end —
+            // because positive Red rotates toward magenta in our (Lightroom-
+            // matching) convention. Sliding right pulls the band toward the
+            // color visible at the right side.
+            let stops: [Color] = stride(from: 30.0, through: -30.0, by: -15.0).map { d in
                 Color(hue: ((hueDeg + d).truncatingRemainder(dividingBy: 360) + 360)
                         .truncatingRemainder(dividingBy: 360) / 360,
                       saturation: 0.85, brightness: 0.85)

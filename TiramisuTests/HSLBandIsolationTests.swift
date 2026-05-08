@@ -99,29 +99,32 @@ final class HSLBandIsolationTests: XCTestCase {
         }
     }
 
-    func testGreenHueShiftsGreenAndPreservesOthers() throws {
+    func testGreenHueShiftsGreenTowardYellow() throws {
+        // At large hue rotations, mean-hue per band misleads — pixels cross
+        // band boundaries and get reclassified, so the remaining band's mean
+        // can drift in the wrong direction. The robust signal is migration:
+        // green-band pixel count drops, yellow-band count rises.
         let baseline = try renderMetrics(hsl: HSLAdjustments())
-        var hsl = HSLAdjustments(); hsl.greenHue = 1.0   // +60° at full slider
+        var hsl = HSLAdjustments(); hsl.greenHue = 1.0
         let after = try renderMetrics(hsl: hsl)
 
-        guard let bGreen = baseline[.green], let aGreen = after[.green] else {
-            return XCTFail("Need green pixels in fixture")
+        guard let bGreen = baseline[.green], let aGreen = after[.green],
+              let bYellow = baseline[.yellow], let aYellow = after[.yellow] else {
+            return XCTFail("Need green + yellow pixels in fixture")
         }
-        // Green band (120°) rotates toward aqua (180°) at +1 slider — current
-        // renderer convention is "+ Hue = + degrees on the standard wheel"
-        // (green → aqua → blue). Note: Lightroom's convention is the opposite
-        // (green → yellow). Tracked separately; this test just pins the
-        // current renderer behavior so we'd notice if it silently flipped.
-        let dHue = HSLBandMetrics.circularHueDelta(bGreen.meanHue, aGreen.meanHue)
-        XCTAssertGreaterThan(dHue, 5.0,
-                             "greenHue=+1 should rotate green band by ≥5° in current convention (Δ=\(dHue)°)")
+        // Lightroom convention: positive green Hue rotates toward yellow.
+        // Migration: green band loses pixels, yellow band gains.
+        XCTAssertLessThan(aGreen.pixelCount, Int(Double(bGreen.pixelCount) * 0.85),
+            "greenHue=+1 should shrink the green band's pixel count by ≥15% (got \(bGreen.pixelCount) → \(aGreen.pixelCount))")
+        XCTAssertGreaterThan(aYellow.pixelCount, Int(Double(bYellow.pixelCount) * 1.10),
+            "greenHue=+1 should grow the yellow band's pixel count by ≥10% (got \(bYellow.pixelCount) → \(aYellow.pixelCount))")
 
-        // Non-adjacent bands shouldn't shift hue noticeably.
+        // Non-adjacent bands' pixel counts shouldn't shift much.
         for band in [HSLBandMetrics.HueBand.red, .blue, .magenta] {
             guard let b = baseline[band], let a = after[band] else { continue }
-            let dh = abs(HSLBandMetrics.circularHueDelta(b.meanHue, a.meanHue))
-            XCTAssertLessThan(dh, 5.0,
-                              "greenHue=+1 should not shift \(band.label) hue (drifted \(dh)°)")
+            let ratio = Double(a.pixelCount) / Double(max(1, b.pixelCount))
+            XCTAssertEqual(ratio, 1.0, accuracy: 0.10,
+                "greenHue=+1 should not migrate \(band.label) pixels (ratio \(ratio))")
         }
     }
 

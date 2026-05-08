@@ -441,11 +441,13 @@ enum LayerRenderer {
                         let wB = t
                         let dA = table[idxA]
                         let dB = table[idxB]
-                        // Hue shift: map slider [-1...1] to ±60° rotation.
-                        // Wide enough that pushing a slider to its extreme
-                        // visibly moves the band into an adjacent one (e.g.,
-                        // greens to yellow), matching Lightroom's feel.
-                        let dH = (wA * dA.h + wB * dB.h) * 60.0
+                        // Hue shift: map slider [-1...1] to ∓60° rotation.
+                        // Negated so positive slider rotates toward LOWER hue
+                        // degrees (Lightroom convention): green+ → yellow,
+                        // red+ → magenta, blue+ → aqua. ±60° is wide enough
+                        // that pushing to the extreme visibly moves the band
+                        // into an adjacent one.
+                        let dH = -(wA * dA.h + wB * dB.h) * 60.0
                         // Saturation: slider [-1...1] is multiplicative scale ±1.
                         // Negative drives toward gray; positive boosts.
                         let dS = wA * dA.s + wB * dB.s
