@@ -6,30 +6,35 @@ struct AdjustTab: View {
     private var displayedLayer: PXLayer? {
         store.layers.first(where: { $0.id == displayedID })
     }
+
     var body: some View {
         let _ = perfMark("AdjustTab.body")
         Group {
             if let layer = displayedLayer {
                 VStack(spacing: 0) {
-                    SectionDisclosure(title: "LIGHTING", defaultOpen: true) {
+                    InspectorSection("Lighting", defaultOpen: true) {
                         LightingPanel(layer: layer)
                     }
                     if layer.kind == .raster || layer.kind == .text {
-                        SectionDisclosure(title: "RELIGHT", defaultOpen: false) {
+                        InspectorSection("Relight", defaultOpen: false) {
                             RelightPanel(layer: layer)
                         }
                     }
                     if layer.kind == .raster {
-                        SectionDisclosure(title: "SKIN RETOUCH", defaultOpen: false) {
+                        InspectorSection("Skin Retouch", defaultOpen: false) {
                             SkinPanel(layer: layer)
                         }
                     }
-                    SectionDisclosure(title: "FILTERS", defaultOpen: false) {
+                    InspectorSection("Filters", defaultOpen: false) {
                         FiltersPanel(layer: layer)
                     }
                 }
             } else {
-                Text("Select a layer.").foregroundStyle(.secondary).padding()
+                Text("Select a layer.")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
             }
         }
         .task(id: store.activeLayerID) {
@@ -39,113 +44,251 @@ struct AdjustTab: View {
     }
 }
 
+// MARK: - Lighting
+
 private struct LightingPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+    @AppStorage("world.hanley.tiramisu.adjust.customizeOpen") private var customizeOpen: Bool = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            adjRow("Brightness", \.brightness, -1...1)
-            adjRow("Contrast", \.contrast, -1...1)
-            adjRow("Exposure", \.exposure, -2...2)
-            adjRow("Saturation", \.saturation, -1...1)
-            adjRow("Warmth", \.warmth, -1...1)
-            adjRow("Shadows", \.shadows, -1...1)
-            adjRow("Highlights", \.highlights, -1...1)
-            Button("Reset") {
-                layer.adjust = Adjustments(); store.invalidate()
-            }.buttonStyle(.borderless).font(.caption)
+        VStack(alignment: .leading, spacing: 12) {
+            // Auto Enhance — the one-click "make it look better" path.
+            Button {
+                store.checkpoint("Auto Enhance")
+                layer.adjust = AdjustPreset.auto
+                store.invalidate()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "wand.and.stars")
+                    Text("Auto Enhance")
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .help("One-click universal lift: gentle contrast + saturation + shadow recovery")
+
+            // Preset chip row — horizontal scroll of named looks.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(AdjustPreset.library) { preset in
+                        PresetChip(preset: preset, isSelected: layer.adjust == preset.target) {
+                            store.checkpoint("Apply \(preset.name)")
+                            layer.adjust = preset.target
+                            store.invalidate()
+                        }
+                    }
+                }
+                .padding(.horizontal, 1)
+                .padding(.vertical, 2)
+            }
+            .frame(height: 56)
+
+            // Customize disclosure — power-user manual sliders, hidden by default.
+            DisclosureGroup(isExpanded: $customizeOpen) {
+                VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+                    adjRow("Brightness", \.brightness, -1...1)
+                    adjRow("Contrast", \.contrast, -1...1)
+                    adjRow("Exposure", \.exposure, -2...2)
+                    adjRow("Saturation", \.saturation, -1...1)
+                    adjRow("Warmth", \.warmth, -1...1)
+                    adjRow("Shadows", \.shadows, -1...1)
+                    adjRow("Highlights", \.highlights, -1...1)
+
+                    HStack {
+                        Spacer()
+                        Button("Reset") {
+                            store.checkpoint("Reset Adjustments")
+                            layer.adjust = Adjustments()
+                            store.invalidate()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                    }
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Customize")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
-    @ViewBuilder private func adjRow(_ label: String, _ kp: WritableKeyPath<Adjustments, Double>, _ range: ClosedRange<Double>) -> some View {
-        LabeledContent(label) {
-            HStack {
-                Slider(value: Binding(
+
+    @ViewBuilder
+    private func adjRow(_ label: String, _ kp: WritableKeyPath<Adjustments, Double>, _ range: ClosedRange<Double>) -> some View {
+        InspectorRow(label) {
+            InspectorSlider(
+                Binding(
                     get: { layer.adjust[keyPath: kp] },
-                    set: { layer.adjust[keyPath: kp] = $0; store.invalidate() }
-                ), in: range)
-                Text(String(format: "%+.2f", layer.adjust[keyPath: kp])).font(.caption.monospacedDigit()).frame(width: 44, alignment: .trailing)
-            }
+                    set: { layer.adjust[keyPath: kp] = $0 }
+                ),
+                in: range,
+                format: .decimal(2)
+            ) { store.invalidate() }
         }
     }
 }
 
+// MARK: - Preset chip
+
+private struct PresetChip: View {
+    let preset: AdjustPreset
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                // Color-gradient swatch tile. Hint of the preset's vibe.
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [preset.accent.0, preset.accent.1],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 44, height: 30)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(.separator.opacity(isSelected ? 0 : 0.4), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
+
+                Text(preset.name)
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+            }
+            .padding(2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(preset.name)
+    }
+}
+
+// MARK: - Relight
+
 private struct RelightPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
             Toggle("Enable Relight", isOn: $layer.relight.enabled)
                 .onChange(of: layer.relight.enabled) { store.invalidate() }
-            LabeledContent("Intensity") {
-                Slider(value: $layer.relight.intensity, in: 0...2)
-                    .onChange(of: layer.relight.intensity) { store.invalidate() }
+
+            InspectorRow("Intensity") {
+                InspectorSlider($layer.relight.intensity, in: 0...2, format: .decimal(2)) { store.invalidate() }
             }
-            LabeledContent("Radius") {
-                Slider(value: $layer.relight.radius, in: 0.05...1.5)
-                    .onChange(of: layer.relight.radius) { store.invalidate() }
+            InspectorRow("Radius") {
+                InspectorSlider($layer.relight.radius, in: 0.05...1.5, format: .decimal(2)) { store.invalidate() }
             }
-            LabeledContent("Tint") {
-                ColorPicker("", selection: Binding(
+            InspectorRow("Tint") {
+                InspectorColorWell(color: Binding(
                     get: { layer.relight.color.swiftUIColor },
                     set: { layer.relight.color = ColorRGB($0.asNSColor); store.invalidate() }
-                )).labelsHidden()
+                ))
             }
-            LabeledContent("Ambient") {
-                Slider(value: $layer.relight.ambient, in: -1...0.5)
-                    .onChange(of: layer.relight.ambient) { store.invalidate() }
+            InspectorRow("Ambient") {
+                InspectorSlider($layer.relight.ambient, in: -1...0.5, format: .decimal(2)) { store.invalidate() }
             }
-            Divider().padding(.vertical, 2)
-            LabeledContent("X") {
-                Slider(value: Binding(
-                    get: { layer.relight.position.x },
-                    set: { layer.relight.position.x = $0; store.invalidate() }
-                ), in: 0...1)
+
+            Divider().opacity(0.4).padding(.vertical, 4)
+
+            InspectorRow("X") {
+                InspectorSlider(
+                    Binding(
+                        get: { layer.relight.position.x },
+                        set: { layer.relight.position.x = $0 }
+                    ),
+                    in: 0...1,
+                    format: .decimal(2)
+                ) { store.invalidate() }
             }
-            LabeledContent("Y") {
-                Slider(value: Binding(
-                    get: { layer.relight.position.y },
-                    set: { layer.relight.position.y = $0; store.invalidate() }
-                ), in: 0...1)
+            InspectorRow("Y") {
+                InspectorSlider(
+                    Binding(
+                        get: { layer.relight.position.y },
+                        set: { layer.relight.position.y = $0 }
+                    ),
+                    in: 0...1,
+                    format: .decimal(2)
+                ) { store.invalidate() }
             }
-            Text("Select the Relight tool (☀ in the sidebar) and drag on the canvas to aim the key light.")
-                .font(.caption).foregroundStyle(.secondary)
+
+            InspectorFootnote("Select the Relight tool (☀ in the sidebar) and drag on the canvas to aim the key light.")
         }
     }
 }
+
+// MARK: - Skin
 
 private struct SkinPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
     @State private var showMask: Bool = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Enable Skin Retouch", isOn: $layer.skin.enabled).onChange(of: layer.skin.enabled) { store.invalidate() }
-            LabeledContent("Smooth") { Slider(value: $layer.skin.smooth, in: 0...1).onChange(of: layer.skin.smooth) { store.invalidate() } }
-            LabeledContent("Even Tone") { Slider(value: $layer.skin.evenTone, in: 0...1).onChange(of: layer.skin.evenTone) { store.invalidate() } }
-            LabeledContent("De-age") { Slider(value: $layer.skin.deage, in: 0...1).onChange(of: layer.skin.deage) { store.invalidate() } }
-            LabeledContent("Glow") { Slider(value: $layer.skin.glow, in: 0...1).onChange(of: layer.skin.glow) { store.invalidate() } }
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+            Toggle("Enable Skin Retouch", isOn: $layer.skin.enabled)
+                .onChange(of: layer.skin.enabled) { store.invalidate() }
+
+            InspectorRow("Smooth") {
+                InspectorSlider($layer.skin.smooth, in: 0...1, format: .percent) { store.invalidate() }
+            }
+            InspectorRow("Even tone") {
+                InspectorSlider($layer.skin.evenTone, in: 0...1, format: .percent) { store.invalidate() }
+            }
+            InspectorRow("De-age") {
+                InspectorSlider($layer.skin.deage, in: 0...1, format: .percent) { store.invalidate() }
+            }
+            InspectorRow("Glow") {
+                InspectorSlider($layer.skin.glow, in: 0...1, format: .percent) { store.invalidate() }
+            }
+
             Toggle("Debug: show face mask", isOn: $showMask)
                 .onChange(of: showMask) {
                     SkinProcessor.debugShowMask = showMask
                     store.invalidate()
                 }
-            Text("Toggle 'show face mask' to see what the algorithm thinks is skin (red overlay).")
-                .font(.caption).foregroundStyle(.secondary)
+
+            InspectorFootnote("Toggle 'show face mask' to see what the algorithm thinks is skin (red overlay).")
         }
     }
 }
 
+// MARK: - Filters
+
 private struct FiltersPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            LabeledContent("Gaussian Blur") { Slider(value: $layer.filters.blur, in: 0...50).onChange(of: layer.filters.blur) { store.invalidate() } }
-            LabeledContent("Sharpen") { Slider(value: $layer.filters.sharpen, in: 0...2).onChange(of: layer.filters.sharpen) { store.invalidate() } }
-            LabeledContent("Noise") { Slider(value: $layer.filters.noise, in: 0...1).onChange(of: layer.filters.noise) { store.invalidate() } }
-            Toggle("Monochrome Noise", isOn: $layer.filters.noiseMono).onChange(of: layer.filters.noiseMono) { store.invalidate() }
-            LabeledContent("Pixelate") { Slider(value: $layer.filters.pixelate, in: 0...40).onChange(of: layer.filters.pixelate) { store.invalidate() } }
-            LabeledContent("Hue Shift") { Slider(value: $layer.filters.hueShift, in: -180...180).onChange(of: layer.filters.hueShift) { store.invalidate() } }
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+            InspectorRow("Blur") {
+                InspectorSlider($layer.filters.blur, in: 0...50, format: .integer) { store.invalidate() }
+            }
+            InspectorRow("Sharpen") {
+                InspectorSlider($layer.filters.sharpen, in: 0...2, format: .decimal(2)) { store.invalidate() }
+            }
+            InspectorRow("Noise") {
+                InspectorSlider($layer.filters.noise, in: 0...1, format: .percent) { store.invalidate() }
+            }
+            Toggle("Monochrome noise", isOn: $layer.filters.noiseMono)
+                .onChange(of: layer.filters.noiseMono) { store.invalidate() }
+            InspectorRow("Pixelate") {
+                InspectorSlider($layer.filters.pixelate, in: 0...40, format: .integer) { store.invalidate() }
+            }
+            InspectorRow("Hue shift") {
+                InspectorSlider($layer.filters.hueShift, in: -180...180, format: .degrees) { store.invalidate() }
+            }
         }
     }
 }

@@ -13,41 +13,42 @@ struct PropertiesTab: View {
     var body: some View {
         let _ = perfMark("PropertiesTab.body")
         VStack(spacing: 0) {
-            SectionDisclosure(title: "DOCUMENT", defaultOpen: true) {
+            InspectorSection("Document", defaultOpen: true) {
                 DocumentPanel()
             }
             if let layer = displayedLayer {
-                SectionDisclosure(title: "LAYER", defaultOpen: true) {
+                InspectorSection("Layer", defaultOpen: true) {
                     LayerBasics(layer: layer)
                 }
                 if layer.kind == .text {
-                    SectionDisclosure(title: "TEXT", defaultOpen: true) {
+                    InspectorSection("Text", defaultOpen: true) {
                         TextEditorPanel(layer: layer)
                     }
                 }
                 if layer.kind == .gradient {
-                    SectionDisclosure(title: "GRADIENT", defaultOpen: true) {
+                    InspectorSection("Gradient", defaultOpen: true) {
                         GradientEditorPanel(layer: layer)
                     }
                 }
                 if layer.kind == .solid {
-                    SectionDisclosure(title: "SOLID COLOR", defaultOpen: true) {
+                    InspectorSection("Solid Color", defaultOpen: true) {
                         SolidEditorPanel(layer: layer)
                     }
                 }
                 if layer.smart != nil {
-                    SectionDisclosure(title: "SMART OBJECT", defaultOpen: true) {
+                    InspectorSection("Smart Object", defaultOpen: true) {
                         SmartObjectPanel(layer: layer)
                     }
-                    SectionDisclosure(title: "CUTOUT / BACKGROUND", defaultOpen: true) {
+                    InspectorSection("Cutout / Background", defaultOpen: true) {
                         CutoutPanel(layer: layer)
                     }
                 }
             } else {
                 Text("Select a layer to see its properties.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding()
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
             }
         }
         .task(id: store.activeLayerID) {
@@ -57,34 +58,37 @@ struct PropertiesTab: View {
     }
 }
 
+// MARK: - Document
+
 private struct DocumentPanel: View {
     @Environment(DocumentStore.self) private var store
     @State private var widthText: String = ""
     @State private var heightText: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Size") {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+            InspectorRow("Size") {
                 HStack(spacing: 4) {
                     TextField("W", text: $widthText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 64)
                         .onSubmit { commitSize() }
-                    Text("×").foregroundStyle(.secondary)
+                    Text("×").foregroundStyle(.tertiary)
                     TextField("H", text: $heightText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 64)
                         .onSubmit { commitSize() }
-                    Text("px").font(.caption).foregroundStyle(.secondary)
+                    Text("px").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-            LabeledContent("Background") {
-                ColorPicker("", selection: Binding(
-                    get: { store.backgroundColor.swiftUIColor },
-                    set: { store.backgroundColor = ColorRGB($0.asNSColor); store.invalidate() }
-                ))
-                .labelsHidden()
-                .help("Canvas background — shows behind all layers and through transparent areas")
+            InspectorRow("Background") {
+                InspectorColorWell(
+                    color: Binding(
+                        get: { store.backgroundColor.swiftUIColor },
+                        set: { store.backgroundColor = ColorRGB($0.asNSColor); store.invalidate() }
+                    ),
+                    help: "Canvas background — shows behind all layers and through transparent areas"
+                )
             }
         }
         .onAppear { syncFromStore() }
@@ -107,21 +111,21 @@ private struct DocumentPanel: View {
     }
 }
 
+// MARK: - Layer basics
+
 private struct LayerBasics: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Name") {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+            InspectorRow("Name") {
                 TextField("", text: $layer.name).textFieldStyle(.roundedBorder)
             }
-            LabeledContent("Opacity") {
-                HStack {
-                    Slider(value: $layer.opacity, in: 0...1).onChange(of: layer.opacity) { store.invalidate() }
-                    Text("\(Int(layer.opacity * 100))").font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
-                }
+            InspectorRow("Opacity") {
+                InspectorSlider($layer.opacity, in: 0...1, format: .percent) { store.invalidate() }
             }
-            LabeledContent("Blend") {
+            InspectorRow("Blend") {
                 Picker("", selection: $layer.blend) {
                     ForEach(BlendMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -131,6 +135,8 @@ private struct LayerBasics: View {
         }
     }
 }
+
+// MARK: - Text
 
 /// Box to hold a weak reference to the rich text view for post-action sync.
 @MainActor
@@ -150,21 +156,24 @@ private struct TextEditorPanel: View {
     @State private var savedSelection: NSRange = .init(location: 0, length: 0)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
             RichTextEditor(text: $attributedText, context: richContext) { view in
                 // Capture the underlying NSTextView so we can re-read its
                 // attributed string after toolbar actions (which RichTextKit
                 // doesn't auto-sync back to the text binding).
                 textViewProxy.view = view
             }
-                .frame(height: 90)
-                .background(Color.black.opacity(0.25))
-                .cornerRadius(4)
+                .frame(height: 96)
+                .padding(6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(.separator, lineWidth: 0.5)
+                )
                 .onAppear { loadFromLayer() }
                 .onChange(of: layer.id) { _, _ in loadFromLayer() }
                 .onChange(of: attributedText) { _, _ in
                     saveToLayer()
-                    // Also capture latest selection so color can be applied after focus change.
                     if let view = textViewProxy.view as? NSTextView {
                         let r = view.selectedRange()
                         if r.length > 0 { savedSelection = r }
@@ -172,16 +181,10 @@ private struct TextEditorPanel: View {
                 }
                 .onReceive(richContext.actionPublisher) { action in
                     tlog("text action: \(action)")
-                    // Stash the selection at action time so the color picker can
-                    // apply to what the user had selected, even if focus changed.
                     if let view = textViewProxy.view {
                         let r = (view as? NSTextView)?.selectedRange() ?? NSRange(location: 0, length: 0)
                         if r.length > 0 { savedSelection = r }
                     }
-                    // Toolbar actions (setColor / setStyle / toggleStyle) mutate
-                    // the NSTextView directly without firing `textDidChange`.
-                    // Pull the updated attributed string on the next tick and
-                    // feed it back through the binding so saveToLayer runs.
                     DispatchQueue.main.async {
                         guard let view = textViewProxy.view else {
                             tlog("text sync: no textView proxy")
@@ -196,41 +199,33 @@ private struct TextEditorPanel: View {
                     }
                 }
 
-            HStack(spacing: 6) {
-                // Our own color picker — applies directly to the NSTextView's
-                // textStorage so we don't depend on RichTextKit's action round-trip
-                // (which silently drops colors when the color panel steals focus).
+            HStack(spacing: 8) {
                 ColorPicker("", selection: $inlineColor)
                     .labelsHidden()
-                    .frame(width: 28)
                     .help("Color for the selected text")
                     .onChange(of: inlineColor) { _, newColor in
                         applyInlineColor(NSColor(newColor))
                     }
-                Button {
+                inlineStyleButton("bold", help: "Bold (⌘B)") {
                     richContext.actionPublisher.send(.toggleStyle(.bold))
-                } label: { Image(systemName: "bold") }
-                .buttonStyle(.bordered).controlSize(.small)
-                Button {
+                }
+                inlineStyleButton("italic", help: "Italic (⌘I)") {
                     richContext.actionPublisher.send(.toggleStyle(.italic))
-                } label: { Image(systemName: "italic") }
-                .buttonStyle(.bordered).controlSize(.small)
-                Button {
+                }
+                inlineStyleButton("underline", help: "Underline (⌘U)") {
                     richContext.actionPublisher.send(.toggleStyle(.underlined))
-                } label: { Image(systemName: "underline") }
-                .buttonStyle(.bordered).controlSize(.small)
-                Button {
+                }
+                inlineStyleButton("strikethrough", help: "Strikethrough") {
                     richContext.actionPublisher.send(.toggleStyle(.strikethrough))
-                } label: { Image(systemName: "strikethrough") }
-                .buttonStyle(.bordered).controlSize(.small)
+                }
                 Spacer()
             }
-            Text("Select any part of the text, then pick a color / bold / italic / underline / strike to style just that range.")
-                .font(.caption).foregroundStyle(.secondary)
 
-            Divider().padding(.vertical, 2)
+            InspectorFootnote("Select any part of the text, then pick a color or B/I/U/S to style just that range.")
 
-            LabeledContent("Font") {
+            Divider().opacity(0.4).padding(.vertical, 4)
+
+            InspectorRow("Font") {
                 Picker("", selection: $layer.text.fontName) {
                     Section("System (SF Pro)") {
                         ForEach(TextFontResolver.systemFamilies, id: \.self) { Text($0).tag($0) }
@@ -242,7 +237,7 @@ private struct TextEditorPanel: View {
                 .labelsHidden()
                 .onChange(of: layer.text.fontName) { store.invalidate() }
             }
-            LabeledContent("Weight (default)") {
+            InspectorRow("Weight") {
                 Picker("", selection: $layer.text.weight) {
                     ForEach(TextFontResolver.weights, id: \.value) { w in
                         Text(w.label).tag(w.value)
@@ -251,37 +246,44 @@ private struct TextEditorPanel: View {
                 .labelsHidden()
                 .onChange(of: layer.text.weight) { store.invalidate() }
             }
-            LabeledContent("Size") {
-                HStack {
-                    Slider(value: $layer.text.fontSize, in: 8...600)
-                        .onChange(of: layer.text.fontSize) { store.invalidate() }
-                    Text("\(Int(layer.text.fontSize))").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
-                }
+            InspectorRow("Size") {
+                InspectorSlider($layer.text.fontSize, in: 8...600, format: .integer) { store.invalidate() }
             }
-            LabeledContent("Default Color") {
-                ColorPicker("", selection: Binding(
-                    get: { layer.text.color.swiftUIColor },
-                    set: { layer.text.color = ColorRGB($0.asNSColor); store.invalidate() }
-                ))
-                .labelsHidden()
-                .help("Default color for this text layer — overridden by per-character colors set inline")
+            InspectorRow("Color") {
+                InspectorColorWell(
+                    color: Binding(
+                        get: { layer.text.color.swiftUIColor },
+                        set: { layer.text.color = ColorRGB($0.asNSColor); store.invalidate() }
+                    ),
+                    help: "Default color for this text layer — overridden by per-character colors set inline"
+                )
             }
-            LabeledContent("Align") {
+            InspectorRow("Align") {
                 Picker("", selection: $layer.text.alignment) {
                     Text("Left").tag("left"); Text("Center").tag("center"); Text("Right").tag("right")
                 }
                 .pickerStyle(.segmented).labelsHidden()
                 .onChange(of: layer.text.alignment) { store.invalidate() }
             }
-            LabeledContent("Line Height") {
-                Slider(value: $layer.text.lineHeight, in: 0.7...1.8)
-                    .onChange(of: layer.text.lineHeight) { store.invalidate() }
+            InspectorRow("Line ht.") {
+                InspectorSlider($layer.text.lineHeight, in: 0.7...1.8, format: .decimal(2)) { store.invalidate() }
             }
-            LabeledContent("Tracking") {
-                Slider(value: $layer.text.tracking, in: -20...60)
-                    .onChange(of: layer.text.tracking) { store.invalidate() }
+            InspectorRow("Tracking") {
+                InspectorSlider($layer.text.tracking, in: -20...60, format: .signedInteger) { store.invalidate() }
             }
         }
+    }
+
+    @ViewBuilder
+    private func inlineStyleButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 22, height: 20)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(help)
     }
 
     private func loadFromLayer() {
@@ -347,7 +349,6 @@ private struct TextEditorPanel: View {
             return
         }
 
-        // Count explicit foreground colors so we can verify attributes are saved.
         var colorCount = 0
         attributedText.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: attributedText.length)) { val, _, _ in
             if val != nil { colorCount += 1 }
@@ -365,114 +366,85 @@ private struct TextEditorPanel: View {
     }
 }
 
-private struct StyleButton: View {
-    let label: String
-    @Binding var isOn: Bool
-    var bold: Bool = false
-    var italic: Bool = false
-    var underline: Bool = false
-    var strikethrough: Bool = false
-
-    init(_ label: String, isOn: Binding<Bool>, bold: Bool = false, italic: Bool = false, underline: Bool = false, strikethrough: Bool = false) {
-        self.label = label
-        self._isOn = isOn
-        self.bold = bold; self.italic = italic; self.underline = underline; self.strikethrough = strikethrough
-    }
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Text(label)
-                .font(.system(size: 12, weight: bold ? .bold : .regular, design: .default))
-                .italic(italic)
-                .underline(underline)
-                .strikethrough(strikethrough)
-                .frame(width: 28, height: 22)
-                .background(RoundedRectangle(cornerRadius: 5)
-                    .fill(isOn ? Color.accentColor.opacity(0.25) : Color.black.opacity(0.15)))
-                .foregroundStyle(isOn ? Color.accentColor : Color.primary)
-        }
-        .buttonStyle(.plain)
-    }
-}
+// MARK: - Smart Object
 
 private struct SmartObjectPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
-    @State private var isRemovingBG: Bool = false
-
-    @MainActor
-    private func removeBG(layer: PXLayer) async {
-        guard let smart = layer.smart, let cg = SmartObjectEngine.loadSource(smart) else {
-            NSSound.beep(); return
-        }
-        isRemovingBG = true
-        defer { isRemovingBG = false }
-        do {
-            store.checkpoint("Remove Background")
-            let cutout = try await BackgroundRemover.remove(cg)
-            if let png = LayerSnapshot.encodePNG(cutout) {
-                layer.smart?.sourceBytes = png
-                layer.smart?.sourceFormat = "png"
-                store.invalidate()
-            }
-        } catch {
-            NSSound.beep()
-            terr("Remove BG (inspector) failed: \(error)")
-        }
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
             if let smart = layer.smart {
-                HStack {
-                    Text("Source:")
-                        .foregroundStyle(.secondary).font(.caption)
+                InspectorRow("Source") {
                     Text(smart.sourcePath ?? "<embedded>")
-                        .font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                HStack {
-                    Text("\(smart.pixelWidth) × \(smart.pixelHeight) px")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Edit in…") { store.openSmartLayerInExternalEditor(layer) }
-                        .buttonStyle(.borderless).font(.caption)
+                InspectorRow("Pixels") {
+                    HStack {
+                        Text("\(smart.pixelWidth) × \(smart.pixelHeight)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Edit in…") { store.openSmartLayerInExternalEditor(layer) }
+                            .buttonStyle(.borderless).font(.caption)
+                    }
                 }
             }
-            LabeledContent("Scale X") {
-                Slider(value: Binding(
-                    get: { layer.smart?.scaleX ?? 1 },
-                    set: { layer.smart?.scaleX = $0; store.invalidate() }
-                ), in: 0.05...8)
+            InspectorRow("Scale X") {
+                InspectorSlider(
+                    Binding(
+                        get: { layer.smart?.scaleX ?? 1 },
+                        set: { layer.smart?.scaleX = $0 }
+                    ),
+                    in: 0.05...8,
+                    format: .decimal(2)
+                ) { store.invalidate() }
             }
-            LabeledContent("Scale Y") {
-                Slider(value: Binding(
-                    get: { layer.smart?.scaleY ?? 1 },
-                    set: { layer.smart?.scaleY = $0; store.invalidate() }
-                ), in: 0.05...8)
+            InspectorRow("Scale Y") {
+                InspectorSlider(
+                    Binding(
+                        get: { layer.smart?.scaleY ?? 1 },
+                        set: { layer.smart?.scaleY = $0 }
+                    ),
+                    in: 0.05...8,
+                    format: .decimal(2)
+                ) { store.invalidate() }
             }
-            LabeledContent("Rotation") {
-                Slider(value: Binding(
-                    get: { layer.smart?.rotationDeg ?? 0 },
-                    set: { layer.smart?.rotationDeg = $0; store.invalidate() }
-                ), in: -180...180)
+            InspectorRow("Rotation") {
+                InspectorSlider(
+                    Binding(
+                        get: { layer.smart?.rotationDeg ?? 0 },
+                        set: { layer.smart?.rotationDeg = $0 }
+                    ),
+                    in: -180...180,
+                    format: .degrees
+                ) { store.invalidate() }
             }
-            HStack {
-                Toggle("Flip H", isOn: Binding(
-                    get: { layer.smart?.flipH ?? false },
-                    set: { layer.smart?.flipH = $0; store.invalidate() }
-                ))
-                Toggle("Flip V", isOn: Binding(
-                    get: { layer.smart?.flipV ?? false },
-                    set: { layer.smart?.flipV = $0; store.invalidate() }
-                ))
+            InspectorRow("Flip") {
+                HStack(spacing: 6) {
+                    Toggle("H", isOn: Binding(
+                        get: { layer.smart?.flipH ?? false },
+                        set: { layer.smart?.flipH = $0; store.invalidate() }
+                    ))
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    Toggle("V", isOn: Binding(
+                        get: { layer.smart?.flipV ?? false },
+                        set: { layer.smart?.flipV = $0; store.invalidate() }
+                    ))
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                }
             }
-            Text("Double-click the canvas to open the source in its default editor. Saving there updates this layer live.")
-                .font(.caption).foregroundStyle(.secondary)
+            InspectorFootnote("Double-click the canvas to open the source in its default editor. Saving there updates this layer live.")
         }
     }
 }
+
+// MARK: - Cutout
 
 private struct CutoutPanel: View {
     @Environment(DocumentStore.self) private var store
@@ -501,54 +473,53 @@ private struct CutoutPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
             HStack {
                 Button {
                     Task { @MainActor in await removeBG() }
                 } label: {
                     Label("Remove Background", systemImage: "person.crop.rectangle.stack")
                 }
+                .controlSize(.small)
                 .disabled(isRemovingBG)
                 if isRemovingBG { ProgressView().controlSize(.small) }
                 Spacer()
             }
-            Text("On-device Vision segmentation. Run it, then fine-tune the edges below.")
-                .font(.caption).foregroundStyle(.secondary)
+            InspectorFootnote("On-device Vision segmentation. Run it, then fine-tune the edges below.")
 
-            Divider().padding(.vertical, 2)
+            Divider().opacity(0.4).padding(.vertical, 4)
 
-            LabeledContent("Edge Offset") {
-                HStack {
-                    Slider(value: Binding(
+            InspectorRow("Edge offset") {
+                InspectorSlider(
+                    Binding(
                         get: { layer.smart?.edgeOffset ?? 0 },
-                        set: { layer.smart?.edgeOffset = $0; store.invalidate() }
-                    ), in: -20...20)
-                    Text(String(format: "%+.0f", layer.smart?.edgeOffset ?? 0))
-                        .font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
-                }
+                        set: { layer.smart?.edgeOffset = $0 }
+                    ),
+                    in: -20...20,
+                    format: .signedInteger
+                ) { store.invalidate() }
             }
-            LabeledContent("Feather") {
-                HStack {
-                    Slider(value: Binding(
+            InspectorRow("Feather") {
+                InspectorSlider(
+                    Binding(
                         get: { layer.smart?.edgeFeather ?? 0 },
-                        set: { layer.smart?.edgeFeather = $0; store.invalidate() }
-                    ), in: 0...20)
-                    Text(String(format: "%.1f", layer.smart?.edgeFeather ?? 0))
-                        .font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
-                }
+                        set: { layer.smart?.edgeFeather = $0 }
+                    ),
+                    in: 0...20,
+                    format: .decimal(1)
+                ) { store.invalidate() }
             }
-            LabeledContent("Threshold") {
-                HStack {
-                    Slider(value: Binding(
+            InspectorRow("Threshold") {
+                InspectorSlider(
+                    Binding(
                         get: { layer.smart?.edgeThreshold ?? 0 },
-                        set: { layer.smart?.edgeThreshold = $0; store.invalidate() }
-                    ), in: 0...1)
-                    Text(String(format: "%.0f%%", (layer.smart?.edgeThreshold ?? 0) * 100))
-                        .font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
-                }
+                        set: { layer.smart?.edgeThreshold = $0 }
+                    ),
+                    in: 0...1,
+                    format: .percent
+                ) { store.invalidate() }
             }
-            Text("Offset grows (+) / shrinks (−) the subject. Feather softens the outline. Threshold hardens the fringe.")
-                .font(.caption).foregroundStyle(.secondary)
+            InspectorFootnote("Offset grows (+) / shrinks (−) the subject. Feather softens the outline. Threshold hardens the fringe.")
 
             HStack {
                 Spacer()
@@ -559,60 +530,69 @@ private struct CutoutPanel: View {
                     layer.smart?.edgeThreshold = 0
                     store.invalidate()
                 }
-                .buttonStyle(.borderless).font(.caption)
+                .buttonStyle(.borderless)
+                .font(.caption)
             }
         }
     }
 }
+
+// MARK: - Solid
 
 private struct SolidEditorPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Color") {
-                ColorPicker("", selection: Binding(
-                    get: { layer.solid.color.swiftUIColor },
-                    set: { layer.solid.color = ColorRGB($0.asNSColor); store.invalidate() }
-                ))
-                .labelsHidden()
-                .help("Fill color for this Solid Color layer")
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+            InspectorRow("Color") {
+                InspectorColorWell(
+                    color: Binding(
+                        get: { layer.solid.color.swiftUIColor },
+                        set: { layer.solid.color = ColorRGB($0.asNSColor); store.invalidate() }
+                    ),
+                    help: "Fill color for this Solid Color layer"
+                )
             }
-            Text("Tip: set layer Blend (in LAYER) to Multiply for a vignette or Screen for a warm color cast.")
-                .font(.caption).foregroundStyle(.secondary)
+            InspectorFootnote("Set layer Blend (in Layer) to Multiply for a vignette or Screen for a warm color cast.")
         }
     }
 }
 
+// MARK: - Gradient
+
 private struct GradientEditorPanel: View {
     @Environment(DocumentStore.self) private var store
     @Bindable var layer: PXLayer
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Type") {
+        VStack(alignment: .leading, spacing: InspectorMetrics.rowSpacing) {
+            InspectorRow("Type") {
                 Picker("", selection: $layer.gradient.kind) {
                     Text("Linear").tag("linear"); Text("Radial").tag("radial")
-                }.pickerStyle(.segmented).labelsHidden()
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 .onChange(of: layer.gradient.kind) { store.invalidate() }
             }
-            LabeledContent("Color 1") {
-                ColorPicker("", selection: Binding(
+            InspectorRow("Color 1") {
+                InspectorColorWell(color: Binding(
                     get: { layer.gradient.c1.swiftUIColor },
                     set: { layer.gradient.c1 = ColorRGB($0.asNSColor); store.invalidate() }
-                )).labelsHidden()
+                ))
             }
-            LabeledContent("Color 2") {
-                ColorPicker("", selection: Binding(
+            InspectorRow("Color 2") {
+                InspectorColorWell(color: Binding(
                     get: { layer.gradient.c2.swiftUIColor },
                     set: { layer.gradient.c2 = ColorRGB($0.asNSColor); store.invalidate() }
-                )).labelsHidden()
+                ))
             }
-            LabeledContent("Angle") {
-                Slider(value: $layer.gradient.angle, in: 0...360).onChange(of: layer.gradient.angle) { store.invalidate() }
+            InspectorRow("Angle") {
+                InspectorSlider($layer.gradient.angle, in: 0...360, format: .degrees) { store.invalidate() }
             }
             if layer.gradient.kind == "radial" {
-                LabeledContent("Radius") {
-                    Slider(value: $layer.gradient.radius, in: 0.05...2).onChange(of: layer.gradient.radius) { store.invalidate() }
+                InspectorRow("Radius") {
+                    InspectorSlider($layer.gradient.radius, in: 0.05...2, format: .decimal(2)) { store.invalidate() }
                 }
             }
         }
