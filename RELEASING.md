@@ -62,6 +62,30 @@ If you've added new features, add light tests for them under
 `LayerArrangeTextTests.swift`, `AdjustPresetTests.swift` — each ~150 LOC,
 cover the public surface of the new code without snapshot churn.
 
+### 1b. Manual smoke test (don't skip)
+
+**Snapshot tests pin pipeline behavior on a specific fixture — they
+don't prove the pipeline is right in all cases.** Two bugs slipped
+through the v0.2.1 release because the test fixture happened to fill
+the canvas, masking layer-alpha bleed bugs that surfaced immediately
+on a smaller smart-object placement.
+
+Before tagging, do this 30-second manual pass:
+
+1. Build Debug (`xcodebuild build`) so the post-build hook installs to
+   `~/Applications/Tiramisu.app`
+2. Open the app, place an image as a smart object on a 1280×720+ canvas
+   *where the image clearly does NOT fill the canvas* (transparent
+   borders matter for catching alpha-related bugs)
+3. Touch every new feature you added: drag each new slider end-to-end,
+   click each new button, toggle each new option
+4. Specifically verify:
+   - Per-layer effects stay within the layer's content, not the canvas
+   - Bounding boxes / handles track when the layer moves
+   - Backward-compat: open an old `.tiramisu` file from a previous
+     version and confirm it loads without errors
+5. Only after this passes, bump the version + tag + release
+
 ### 2. Version bump
 
 Edit `project.yml`:
