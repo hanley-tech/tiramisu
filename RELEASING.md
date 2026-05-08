@@ -33,11 +33,13 @@ git push origin v0.2.0
 # 5. Build, sign, notarize, package, publish
 ./scripts/release.sh v0.2.0
 
-# 6. Update the marketing site roadmap with newly-shipped items
+# 6. Update the marketing site — roadmap + releases page
 cd ../tiramisu_www
-$EDITOR roadmap.html  # mark items shipped, bump shipped counter
-git commit -am "Roadmap: mark vX.Y.Z shipped items"
-git push origin main  # rsync→Lightsail picks it up
+$EDITOR roadmap.html   # mark items shipped, bump shipped counter
+$EDITOR releases.html  # add a new <div class="release latest"> block at the top
+                       # (and remove the .latest class from the previous one)
+git commit -am "Site: vX.Y.Z roadmap + release notes"
+git push origin main   # rsync→Lightsail picks it up
 
 # Done. tiramisu.hanley.world/download now serves the new DMG.
 ```
@@ -108,7 +110,7 @@ Notarization runs in ~1–3 minutes; the script polls until accepted.
 
 ### 5. Marketing-site roadmap update
 
-`tiramisu_www/roadmap.html` is the canonical "what shipped" page —
+`tiramisu_www/roadmap.html` is the canonical "what shipped" checklist —
 public-facing, links from the homepage. After every release:
 
 1. Find each newly-shipped item in the relevant section
@@ -120,7 +122,22 @@ public-facing, links from the homepage. After every release:
 4. Update the section's `<p class="group-stats">N shipped · M planned</p>`
 5. Update the top counter
    (`<div class="summary-cell shipped"><div class="n">…</div></div>`)
-6. Commit and push to `main`. The Lightsail deployment runs on push.
+
+### 5b. Release notes page
+
+`tiramisu_www/releases.html` tells the *story* of each version (the
+roadmap shows current state — this shows how we got here). After every
+release:
+
+1. Add a new `<div class="release latest reveal">` block at the **top**
+   of `<section class="releases">`
+2. Remove the `.latest` class from the previous block (only one release
+   carries the green "Latest" dot)
+3. Fill in `<h2>vX.Y.Z</h2>` + date + a one-line tagline
+4. Group bullets under `<h3>` labels: `New`, `Fixed`, `Under the hood`
+   (skip the empty ones)
+5. Add the GitHub-release + DMG links in the `release-footer`
+6. Commit + push. The Lightsail deployment runs on push.
 
 ### 6. Distribution
 
