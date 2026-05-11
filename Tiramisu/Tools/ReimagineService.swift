@@ -72,6 +72,15 @@ enum ReimagineService {
                 throw ReimagineError.providerFailed(.network(error))
             }
 
+        case OpenAICompatibleProvider.idValue:
+            do {
+                result = try await OpenAICompatibleProvider().reimagine(image: canvasImage, prompt: prompt, progress: progress)
+            } catch let e as ProviderError {
+                throw ReimagineError.providerFailed(e)
+            } catch {
+                throw ReimagineError.providerFailed(.network(error))
+            }
+
         case LocalQwenProvider.idValue:
             do {
                 result = try await LocalQwenProvider().reimagine(image: canvasImage, prompt: prompt, progress: progress)

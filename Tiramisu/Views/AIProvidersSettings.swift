@@ -18,6 +18,12 @@ struct AIProvidersSettings: View {
 
     @State private var geminiTestResult: String?
     @State private var geminiTestOK: Bool = false
+    @State private var oaiBaseURL: String = OpenAICompatibleProvider().baseURL
+    @State private var oaiKey: String = OpenAICompatibleProvider().apiKey
+    @State private var oaiModel: String = OpenAICompatibleProvider().model
+    @State private var oaiAuthStyle: OpenAICompatibleProvider.AuthStyle = OpenAICompatibleProvider().authStyle
+    @State private var oaiTestResult: String?
+    @State private var oaiTestOK: Bool = false
 
     var body: some View {
         ScrollView {
@@ -28,6 +34,7 @@ struct AIProvidersSettings: View {
                     .padding(.bottom, 4)
 
                 geminiSection
+                azureOpenAISection
                 localQwenSection
                 replicateSection
                 localFluxSection
@@ -159,6 +166,109 @@ struct AIProvidersSettings: View {
                 default:                 geminiTestResult = "✗ \(err)"
                 }
                 geminiTestOK = false
+            }
+        }
+    }
+
+    // MARK: - OpenAI-compatible
+
+    private var azureOpenAISection: some View {
+        let provider = OpenAICompatibleProvider()
+        return providerCard(
+            displayName: "OpenAI-compatible",
+            configured: provider.isConfigured,
+            helpURL: provider.helpURL,
+            capabilities: "reimagine · ~$0.04/call"
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Base URL  (e.g. https://api.openai.com  or  Azure endpoint)", text: $oaiBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: oaiBaseURL) { _, v in
+                        OpenAICompatibleProvider.setBaseURL(v)
+                        // Re-detect auth style when URL changes, but only if
+                        // the user hasn't manually overridden it yet.
+                        oaiAuthStyle = OpenAICompatibleProvider.detectAuthStyle(for: v)
+                        OpenAICompatibleProvider.setAuthStyle(oaiAuthStyle)
+                    }
+                HStack {
+                    SecureField("API key", text: $oaiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: oaiKey) { _, v in OpenAICompatibleProvider.setAPIKey(v) }
+                    TextField("Model / deployment", text: $oaiModel)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                        .onChange(of: oaiModel) { _, v in OpenAICompatibleProvider.setModel(v) }
+                    Button("Test") { Task { await testOpenAI() } }
+                        .disabled(oaiBaseURL.isEmpty || oaiKey.isEmpty)
+                }
+                HStack {
+                    Text("Auth")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, alignment: .leading)
+                    Picker("", selection: $oaiAuthStyle) {
+                        ForEach(OpenAICompatibleProvider.AuthStyle.allCases) { s in
+                            Text(s.displayName).tag(s)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                    .onChange(of: oaiAuthStyle) { _, v in OpenAICompatibleProvider.setAuthStyle(v) }
+                    Text("Auto-detected from URL — override if needed")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let oaiTestResult {
+                    Text(oaiTestResult)
+                        .font(.caption)
+                        .foregroundStyle(oaiTestOK ? .green : .red)
+                }
+            }
+        }
+    }
+
+    private func testOpenAI() async {
+        let provider = OpenAICompatibleProvider()
+        // Quick validation: just check we can reach the endpoint (models list or a HEAD request)
+        let testURLStr: String
+        let base = provider.baseURL.hasSuffix("/") ? String(provider.baseURL.dropLast()) : provider.baseURL
+        let isAzure = provider.authStyle == .azureAPIKey
+        if isAzure {
+            testURLStr = "\(base)/openai/models?api-version=2024-10-21"
+        } else {
+            testURLStr = "\(base)/v1/models"
+        }
+        guard let url = URL(string: testURLStr) else {
+            await MainActor.run { oaiTestResult = "✗ Invalid URL"; oaiTestOK = false }
+            return
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        if isAzure {
+            req.setValue(provider.apiKey, forHTTPHeaderField: "api-key")
+        } else {
+            req.setValue("Bearer \(provider.apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            await MainActor.run {
+                if code == 200 {
+                    oaiTestResult = "✓ Connected"
+                    oaiTestOK = true
+                } else if code == 401 || code == 403 {
+                    oaiTestResult = "✗ Invalid key (HTTP \(code))"
+                    oaiTestOK = false
+                } else {
+                    oaiTestResult = "✗ HTTP \(code)"
+                    oaiTestOK = false
+                }
+            }
+        } catch {
+            await MainActor.run {
+                oaiTestResult = "✗ \(error.localizedDescription)"
+                oaiTestOK = false
             }
         }
     }

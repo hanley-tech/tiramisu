@@ -105,6 +105,7 @@ enum AIProviders {
     static var all: [any AIImageProvider] {
         [
             GeminiProvider(),
+            OpenAICompatibleProvider(),
             LocalQwenProvider(),
             ReplicateProvider(),
             LocalFluxProvider(),

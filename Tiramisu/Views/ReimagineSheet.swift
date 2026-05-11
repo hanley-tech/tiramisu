@@ -253,7 +253,22 @@ struct ReimagineSheet: View {
 
     @ViewBuilder
     private var modelRow: some View {
-        if activeProvider.id == GeminiProvider.idValue {
+        if activeProvider.id == OpenAICompatibleProvider.idValue {
+            HStack {
+                Text("Model")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 60, alignment: .leading)
+                Text(OpenAICompatibleProvider().model)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text("·")
+                    .foregroundStyle(.secondary)
+                Text(OpenAICompatibleProvider().authStyle.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } else if activeProvider.id == GeminiProvider.idValue {
             HStack {
                 Text("Model")
                     .font(.caption.weight(.semibold))
