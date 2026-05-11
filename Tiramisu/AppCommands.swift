@@ -133,14 +133,16 @@ struct AppCommands: Commands {
         if !confirmDiscardChangesIfNeeded() { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [tiramisuType, .json]
-        panel.allowedFileTypes = ["tiramisu", "json"]   // belt & suspenders for older selectors
+        // belt & suspenders for older selectors. .tira is the new short
+        // extension; .tiramisu is the legacy long form, still recognized.
+        panel.allowedFileTypes = ["tira", "tiramisu", "json"]
         panel.allowsOtherFileTypes = true
         panel.treatsFilePackagesAsDirectories = false
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.title = "Open Tiramisu Project"
-        panel.message = "Choose a .tiramisu project file"
+        panel.message = "Choose a .tira or .tiramisu project file"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         FileBookmarks.store(for: url)
         openFile(url: url)
@@ -193,7 +195,7 @@ struct AppCommands: Commands {
     private func saveAs() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [tiramisuType]
-        panel.nameFieldStringValue = store.currentFileURL?.deletingPathExtension().lastPathComponent ?? "Untitled.tiramisu"
+        panel.nameFieldStringValue = store.currentFileURL?.deletingPathExtension().lastPathComponent ?? "Untitled.tira"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         FileBookmarks.store(for: url)
         writeProject(to: url)

@@ -44,7 +44,7 @@ struct TiramisuApp: App {
     static func loadFile(url: URL, into store: DocumentStore) {
         let ext = url.pathExtension.lowercased()
         let target = FileBookmarks.resolve(path: url.path) ?? url
-        if ext == "tiramisu" || ext == "json" {
+        if ext == "tira" || ext == "tiramisu" || ext == "json" {
             do {
                 let data = try FileBookmarks.withScope(target) { try Data(contentsOf: $0) }
                 let snap = try JSONDecoder().decode(DocumentSnapshot.self, from: data)

@@ -96,21 +96,12 @@ final class DocumentStore {
     private(set) var renderTick: Int = 0
 
     init() {
-        let bg = PXLayer(name: "Background Gradient", kind: .gradient)
-        bg.gradient = GradientContent(
-            kind: "linear",
-            c1: ColorRGB(r: 0.10, g: 0.14, b: 0.25), s1: 0,
-            c2: ColorRGB(r: 0.49, g: 0.18, b: 0.42), s2: 1,
-            angle: 135, center: .init(x: 0.5, y: 0.5), radius: 0.7
-        )
-        let title = PXLayer(name: "Hero Text", kind: .text)
-        title.text.string = "EPIC\nTITLE"
-        title.text.fontSize = 220
-        title.styles.stroke = Stroke(enabled: true, color: .black, size: 10, opacity: 1)
-        title.styles.dropShadow = DropShadow(enabled: true, color: .black, opacity: 0.7, distance: 10, angle: 135, blur: 20)
-
-        self.layers = [bg, title]
-        self.activeLayerID = title.id
+        // Empty document by default — the user reaches for the layer they
+        // actually want from the Layer menu (or drops in an image). The
+        // earlier "EPIC TITLE on a gradient" demo content got in the way
+        // of the v0.5 paint workflow and showed up in every screenshot.
+        self.layers = []
+        self.activeLayerID = nil
         self.recentFiles = loadRecents()
     }
 

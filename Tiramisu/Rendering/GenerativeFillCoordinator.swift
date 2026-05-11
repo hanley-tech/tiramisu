@@ -92,22 +92,15 @@ enum GenerativeFillCoordinator {
             progress("Compositing…")
             dumpDebugImage(result, name: "expand-result-raw")
             let resized = resize(result, to: canvas) ?? result
-            // For mask-aware backends (FLUX-Fill, Replicate) in Expand mode,
-            // use the FULL model output as the new layer rather than clipping
-            // to the bands only. The model preserves the layer area and
-            // generates the bands within the SAME VAE pass, so no inter-
-            // region color drift. Clipping to the bands and showing the
-            // original layer through the transparent middle creates a
-            // visible boundary because pristine source pixels ≠ VAE-roundtrip
-            // pixels even with mask-aware preservation. This matches how
-            // Adobe Generative Expand and the HF Space behave — they return
-            // the full result, not a band-only overlay.
-            //
-            // For non-Expand modes (Generate / Replace / Remove via marquee),
-            // we still clip to the marquee mask — that's the expected
-            // semantic: the new layer occupies just the selection, not the
-            // whole canvas.
-            fillOnly = (mode == .expand) ? resized : clipToMask(resized, mask: mask)
+            // Let the model regenerate the FULL canvas (mask-aware backends
+            // handle preservation internally — same VAE pass as the bands so
+            // there's no inter-region color drift inside the model output).
+            // Then, *after* generation, bake the band mask onto the result's
+            // alpha channel so the new layer is transparent in the original
+            // area and the layer underneath continues to contribute. This is
+            // the "full regen + post-hoc alpha" pattern the user asked for —
+            // simpler and more predictable than feathered clipping.
+            fillOnly = clipToMask(resized, mask: mask)
         }
         dumpDebugImage(fillOnly, name: "expand-fillOnly")
 
@@ -171,6 +164,17 @@ enum GenerativeFillCoordinator {
         ctx.interpolationQuality = .high
         ctx.draw(image, in: CGRect(origin: .zero, size: size))
         return ctx.makeImage()
+    }
+
+    /// Apply a Gaussian blur to a mask so the binary on/off boundary
+    /// becomes a soft alpha gradient over `radius` pixels. Used in Expand
+    /// mode to hide the VAE-roundtrip seam where generated bands meet the
+    /// pristine original layer underneath. Without this, even a 1-pixel
+    /// VAE drift in color reads as a hard line at the mask edge.
+    private static func featherMask(_ mask: CGImage, radius: Double) -> CGImage {
+        let ci = CIImage(cgImage: mask)
+        let blurred = ci.applyingGaussianBlur(sigma: radius).cropped(to: ci.extent)
+        return LayerRenderer.ciContext.createCGImage(blurred, from: ci.extent) ?? mask
     }
 
     /// Keep only the white-mask regions of `image`; the rest becomes

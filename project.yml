@@ -58,7 +58,8 @@ targets:
               - public.data
             UTTypeTagSpecification:
               public.filename-extension:
-                - tiramisu
+                - tira          # short alias — preferred for new docs
+                - tiramisu      # legacy long extension — still recognized
               public.mime-type:
                 - application/x-tiramisu+json
         CFBundleDocumentTypes:
@@ -68,6 +69,7 @@ targets:
             LSItemContentTypes:
               - world.hanley.tiramisu.project
             CFBundleTypeExtensions:
+              - tira
               - tiramisu
     # Sandbox is INTENTIONALLY DISABLED so the app can spawn the user-installed
     # mflux-generate-fill subprocess for the Local FLUX-Fill backend (see

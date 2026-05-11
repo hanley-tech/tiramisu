@@ -157,26 +157,37 @@ struct LocalFluxFillService: GenerativeFillService {
         try proc.run()
 
         // Stream stdout/stderr lines into the progress callback so the user
-        // sees per-step inference updates.
+        // sees per-step inference updates. We *also* keep every line in a
+        // ring buffer so the failure path has real diagnostics — earlier
+        // versions only relied on `readToEnd` after exit, which returned
+        // ~nothing because the stream had already drained the pipe.
+        let lineBuffer = LineBuffer(capacity: 80)
         let streamTask = Task.detached {
             let handle = outPipe.fileHandleForReading
-            for try await line in handle.bytes.lines {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty { continue }
-                if trimmed.contains("%") || trimmed.contains("step") || trimmed.contains("Fetching") {
-                    progress(trimmed)
+            do {
+                for try await line in handle.bytes.lines {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if trimmed.isEmpty { continue }
+                    await lineBuffer.append(trimmed)
+                    if trimmed.contains("%") || trimmed.contains("step") || trimmed.contains("Fetching") {
+                        progress(trimmed)
+                    }
                 }
+            } catch {
+                // Stream errors are usually pipe-closed-by-exit, harmless.
             }
         }
         proc.waitUntilExit()
+        // Give the stream a beat to drain any final lines after exit.
+        try? await Task.sleep(nanoseconds: 100_000_000)
         streamTask.cancel()
 
         guard proc.terminationStatus == 0 else {
-            // Drain remaining output for diagnostics.
-            let remaining = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
-            let tail = String(data: remaining, encoding: .utf8)?.suffix(800) ?? ""
+            let captured = await lineBuffer.snapshot()
+            let tail = captured.suffix(40).joined(separator: "\n")
+            terr("mflux exited \(proc.terminationStatus). Captured \(captured.count) line(s). Tail:\n\(tail)")
             throw GenerativeFillError.predictionFailed(
-                "mflux exited \(proc.terminationStatus). Last output:\n\(tail)")
+                "mflux exited \(proc.terminationStatus). Last output:\n\(tail.isEmpty ? "(no output captured — check Console for stderr)" : tail)")
         }
 
         progress("Decoding output…")
@@ -242,4 +253,24 @@ struct LocalFluxFillService: GenerativeFillService {
             throw GenerativeFillError.predictionFailed("Could not write PNG at \(url.path)")
         }
     }
+}
+
+/// Bounded ring buffer of stream lines for diagnostics. Keeps memory
+/// flat across long mflux runs while still preserving the tail that
+/// matters when the subprocess fails. Actor-isolated so the streaming
+/// task and the post-exit reader don't race.
+private actor LineBuffer {
+    private var lines: [String] = []
+    private let capacity: Int
+
+    init(capacity: Int) { self.capacity = capacity }
+
+    func append(_ line: String) {
+        lines.append(line)
+        if lines.count > capacity {
+            lines.removeFirst(lines.count - capacity)
+        }
+    }
+
+    func snapshot() -> [String] { lines }
 }
