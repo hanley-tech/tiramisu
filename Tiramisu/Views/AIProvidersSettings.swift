@@ -15,6 +15,7 @@ struct AIProvidersSettings: View {
     @State private var geminiAvailableModels: [GeminiImageService.DiscoveredModel] = []
     @State private var geminiModelsLoading: Bool = false
     @State private var replicateKey: String = ""
+    @State private var fillBackend: GenerativeFillSettings.Backend = GenerativeFillSettings.backend
 
     @State private var geminiTestResult: String?
     @State private var geminiTestOK: Bool = false
@@ -36,6 +37,7 @@ struct AIProvidersSettings: View {
                 geminiSection
                 azureOpenAISection
                 localQwenSection
+                fillBackendSection
                 replicateSection
                 localFluxSection
 
@@ -271,6 +273,37 @@ struct AIProvidersSettings: View {
                 oaiTestOK = false
             }
         }
+    }
+
+    // MARK: - Fill backend picker
+
+    private var fillBackendSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("GENERATIVE FILL")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            HStack(spacing: 10) {
+                Text("Active backend")
+                    .font(.callout)
+                Picker("", selection: $fillBackend) {
+                    Text("Replicate  (cloud)").tag(GenerativeFillSettings.Backend.replicate)
+                    Text("Local FLUX  (on-device)").tag(GenerativeFillSettings.Backend.localFlux)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 280)
+                .onChange(of: fillBackend) { _, v in
+                    GenerativeFillSettings.backend = v
+                }
+            }
+            Text("Inpaint and outpaint use this backend. Reimagine is selected per-call from the Reimagine sheet.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
     }
 
     // MARK: - Replicate

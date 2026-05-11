@@ -16,10 +16,17 @@ protocol GenerativeFillService: Sendable {
     /// resolution (e.g. Local SD-1.5 → 512×512), which destroys aspect
     /// ratio and means the bands never get seen at native resolution.
     var preferredInputSize: CGSize? { get }
+
+    /// If true, the coordinator pre-fills empty expand bands with
+    /// stretched edge content before sending to the service. Set this for
+    /// backends that expect the image to have plausible content everywhere
+    /// (e.g. OpenAI images/edits) rather than mask-guided blank regions.
+    var needsPrepFill: Bool { get }
 }
 
 extension GenerativeFillService {
     var preferredInputSize: CGSize? { nil }
+    var needsPrepFill: Bool { false }
 }
 
 /// What the user is asking the fill engine to do. Drives mask shape,
@@ -179,7 +186,7 @@ enum GenerativeFillSettings {
     private static let modelKey = "world.hanley.tiramisu.replicate.model"
     private static let backendKey = "world.hanley.tiramisu.fill.backend"
 
-    enum Backend: String { case replicate, localFlux }
+    enum Backend: String { case replicate, localFlux, openaicompat }
 
     static var apiKey: String {
         get { UserDefaults.standard.string(forKey: apiKeyKey) ?? "" }

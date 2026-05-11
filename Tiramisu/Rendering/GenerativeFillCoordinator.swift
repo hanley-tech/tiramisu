@@ -29,9 +29,10 @@ enum GenerativeFillCoordinator {
         let mask: CGImage
         if mode == .expand {
             // FLUX-Fill and Replicate are mask-aware — they figure out band
-            // content from the mask alone, no prep fill required. Only legacy
-            // fixed-input-size backends need a pre-filled conditioning image.
-            let needsPrepFill = service.preferredInputSize != nil
+            // content from the mask alone, no prep fill required. Backends
+            // that need real image content in all pixels (e.g. OpenAI
+            // images/edits) set needsPrepFill = true to get pre-stretched edges.
+            let needsPrepFill = service.preferredInputSize != nil || service.needsPrepFill
             if needsPrepFill {
                 let prepared = try buildExpandInput(store: store, layer: activeLayer)
                 context = prepared.image

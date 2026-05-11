@@ -116,11 +116,29 @@ enum GenerativeFillUI {
             return "No marquee — entire canvas will be the fill region."
         }()
 
-        // Build a compact stack: mode picker, prompt, context toggle.
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 420, height: 110))
+        // Build a compact stack: backend picker, mode picker, prompt.
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 420, height: 160))
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
+
+        // Backend / model picker
+        let backendLabel = NSTextField(labelWithString: "Model")
+        let backendPopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
+        let fluxTitle = LocalFluxFillService.isInstalled
+            ? "Local FLUX-Fill  ·  on-device"
+            : "Local FLUX-Fill  (mflux not installed)"
+        backendPopup.addItem(withTitle: "Replicate  ·  FLUX-Fill  (cloud)")
+        backendPopup.addItem(withTitle: fluxTitle)
+        let backendIndex: Int
+        switch GenerativeFillSettings.backend {
+        case .replicate:    backendIndex = 0
+        case .localFlux:    backendIndex = 1
+        case .openaicompat: backendIndex = 0  // fallback to Replicate
+        }
+        backendPopup.selectItem(at: backendIndex)
+        stack.addArrangedSubview(backendLabel)
+        stack.addArrangedSubview(backendPopup)
 
         let modeLabel = NSTextField(labelWithString: "Mode")
         let modePopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
@@ -138,11 +156,18 @@ enum GenerativeFillUI {
         stack.addArrangedSubview(NSTextField(labelWithString: "Prompt (optional for Remove / Expand)"))
         stack.addArrangedSubview(field)
 
-        stack.frame.size = NSSize(width: 420, height: 130)
+        stack.frame.size = NSSize(width: 420, height: 162)
         alert.accessoryView = stack
         alert.addButton(withTitle: "Generate")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // Persist the chosen backend for next time.
+        switch backendPopup.indexOfSelectedItem {
+        case 1:  GenerativeFillSettings.backend = .localFlux
+        default: GenerativeFillSettings.backend = .replicate
+        }
+
         let modeRaw = modePopup.indexOfSelectedItem
         let mode = GenerativeFillMode(rawValue: modeRaw) ?? .generate
         var prompt = field.stringValue
@@ -183,6 +208,20 @@ enum GenerativeFillUI {
             }
             service = ReplicateFillService(apiKey: GenerativeFillSettings.apiKey,
                                             modelVersion: GenerativeFillSettings.model)
+        case .openaicompat:
+            let provider = OpenAICompatibleProvider()
+            guard provider.isConfigured else {
+                let a = NSAlert()
+                a.messageText = "OpenAI-compatible provider not configured"
+                a.informativeText = "Add a base URL and API key in Settings → AI Providers."
+                a.addButton(withTitle: "Open Settings")
+                a.addButton(withTitle: "Cancel")
+                if a.runModal() == .alertFirstButtonReturn { presentSettings() }
+                return
+            }
+            service = OpenAICompatibleFillService(
+                baseURL: provider.baseURL, apiKey: provider.apiKey,
+                model: provider.model, authStyle: provider.authStyle)
         }
 
         let win = ProgressWindow.show(title: "Generative Fill", detail: "Starting…")
@@ -241,8 +280,9 @@ enum GenerativeFillUI {
         }()
         backendPopup.addItem(withTitle: fluxLabel)
         switch GenerativeFillSettings.backend {
-        case .replicate: backendPopup.selectItem(at: 0)
-        case .localFlux: backendPopup.selectItem(at: 1)
+        case .replicate:      backendPopup.selectItem(at: 0)
+        case .localFlux:      backendPopup.selectItem(at: 1)
+        case .openaicompat:   break
         }
         stack.addArrangedSubview(backendLabel)
         stack.addArrangedSubview(backendPopup)

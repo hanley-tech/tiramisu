@@ -38,7 +38,7 @@ enum ProviderCostModel: Sendable, Equatable {
 
 /// Typed errors a provider can raise. Mapped to user-facing strings by
 /// the calling feature; we don't bake copy into the protocol.
-enum ProviderError: Error, Sendable {
+enum ProviderError: Error, LocalizedError, Sendable {
     case notConfigured                       // no API key, binary not installed
     case invalidKey                          // 401 / 403 from auth check
     case quotaExceeded(detail: String)       // 429 — detail = actual provider message (daily / per-min / token / project)
@@ -47,6 +47,19 @@ enum ProviderError: Error, Sendable {
     case network(Error)                      // transport failure
     case decodeFailure(String)               // response body wasn't what we expected
     case unknown(String)                     // catch-all with provider's message
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured:               return "Provider not configured — check Settings → AI Providers."
+        case .invalidKey:                  return "Invalid API key (HTTP 401/403)."
+        case .quotaExceeded(let d):        return "Quota / rate limit: \(d)"
+        case .invalidInput(let s):         return "Invalid input: \(s)"
+        case .contentPolicy:               return "Request blocked by content policy."
+        case .network(let e):              return "Network error: \(e.localizedDescription)"
+        case .decodeFailure(let s):        return "Could not decode response: \(s)"
+        case .unknown(let s):              return s
+        }
+    }
 }
 
 /// What every AI image provider implements. Tiny on purpose — capability-

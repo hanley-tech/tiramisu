@@ -411,6 +411,14 @@ final class ControlServer {
                 }
                 service = ReplicateFillService(apiKey: GenerativeFillSettings.apiKey,
                                                 modelVersion: GenerativeFillSettings.model)
+            case .openaicompat:
+                let provider = OpenAICompatibleProvider()
+                guard provider.isConfigured else {
+                    return httpResponse(status: 412, body: "OpenAI-compatible provider not configured")
+                }
+                service = OpenAICompatibleFillService(
+                    baseURL: provider.baseURL, apiKey: provider.apiKey,
+                    model: provider.model, authStyle: provider.authStyle)
             }
             let group = DispatchGroup()
             group.enter()
