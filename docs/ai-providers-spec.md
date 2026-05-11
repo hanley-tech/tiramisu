@@ -71,8 +71,14 @@ protocol AIImageProvider: Sendable {
     var displayName: String { get }                       // "Google Gemini"
     var capabilities: Set<AIImageCapability> { get }
     var requiresAPIKey: Bool { get }                      // false for LocalFlux
-    var freeQuotaDescription: String? { get }             // "500 calls/day free" or nil
     var helpURL: URL { get }                              // where to get an API key
+
+    /// Per-(provider, model, capability) cost characterization. Used by
+    /// the Reimagine sheet to show a green/yellow/red cost line BEFORE
+    /// the user spends a call. Estimates only — no provider returns
+    /// authoritative pre-call billing data, so this is published-rate
+    /// info paired with a local quota counter (see QuotaTracker).
+    func costModel(for capability: AIImageCapability, model: String) -> ProviderCostModel
 
     /// True if the provider is configured + ready (key present, binary
     /// installed, etc.). Cheap; called on every settings panel render.
@@ -82,6 +88,22 @@ protocol AIImageProvider: Sendable {
     /// isn't malformed. Called when user clicks "Test" in settings.
     /// Default impl returns true.
     func validateConfiguration() async -> Result<Void, ProviderError>
+}
+
+enum ProviderCostModel: Sendable {
+    /// Always free, runs on the user's hardware. e.g. LocalFlux.
+    case alwaysFree
+
+    /// Free quota of N calls per UTC-day (or local, depending on
+    /// provider), then the per-call rate kicks in IF the user has billing
+    /// enabled on their account. e.g. Gemini 500/day free, then ~$0.04.
+    case freeQuotaThenPaid(perDay: Int, paidEstimateUSD: Double)
+
+    /// Pure pay-per-call. e.g. Replicate, OpenAI.
+    case payPerCall(estimateUSD: Double)
+
+    /// We don't know — show "Cost: unknown" in the UI rather than lie.
+    case unknown
 }
 ```
 
@@ -157,15 +179,75 @@ single-user creator tool storing the user's own BYO keys; the user can
 audit the source. UserDefaults is the right choice for v0.6. A future
 security pass can move to Keychain if a real complaint emerges.
 
+### Cost-awareness via QuotaTracker
+
+The Reimagine sheet should show a clear cost line BEFORE the user
+spends a call: "Free (487/500 today)" / "Paid (~$0.04/call)" /
+"$0 — runs on your Mac". The honest reality across providers:
+
+- **No major AI API exposes live remaining-quota in response headers.**
+  Gemini doesn't, OpenAI doesn't, Replicate doesn't. We can only
+  approximate.
+- **No major API tells us the user's billing tier reliably.** Gemini's
+  free vs paid mode depends on whether the user enabled billing on
+  their Google Cloud project — that's invisible without admin scope.
+
+So we approximate, *honestly*:
+
+1. Each provider declares its `costModel` per (capability, model) — see
+   the protocol above. Hard-coded from published pricing pages.
+2. A central `QuotaTracker` actor records every call locally
+   (`{providerID}.{modelID}.{YYYY-MM-DD}` → call count) in
+   UserDefaults. Resets daily.
+3. The Reimagine sheet asks the provider its `costModel` and asks
+   `QuotaTracker` for today's count, then renders one of:
+
+| State                                  | Color | Example label                                                         |
+|----------------------------------------|-------|-----------------------------------------------------------------------|
+| Free, plenty of quota                  | 🟢    | "Free (487/500 used today)"                                           |
+| Free, near limit (≥80%)                | 🟡    | "Free (495/500 — almost out)"                                          |
+| Free quota exhausted on free-then-paid | 🔴    | "Free quota exhausted — next call ~$0.04 if billing is enabled"       |
+| Pay-per-call                           | 💵    | "Paid (~$0.04 per call)"                                              |
+| Always free local                      | 💻    | "Free (runs on your Mac)"                                             |
+| Unknown                                | ❓    | "Cost: unknown — check your provider dashboard"                       |
+
+**Disclaimer line in the sheet** (small, secondary text): "Estimates
+based on published rates. Cross-app calls (e.g. gemini.google.com web,
+other tools) can drift the count — your provider dashboard is
+authoritative."
+
+`QuotaTracker.swift` shape:
+
+```swift
+@MainActor
+actor QuotaTracker {
+    static let shared = QuotaTracker()
+
+    /// Increment today's count for (providerID, modelID).
+    func record(providerID: String, modelID: String)
+
+    /// How many calls today (resets at local midnight)?
+    func count(providerID: String, modelID: String) -> Int
+
+    /// Convenience: is this provider/model under its free quota right now?
+    func underFreeQuota(provider: any AIImageProvider,
+                       capability: AIImageCapability,
+                       modelID: String) -> Bool
+}
+```
+
+Persistence: `world.hanley.tiramisu.quota.{providerID}.{modelID}.{YYYY-MM-DD}`
+in UserDefaults. Old keys (>3 days) get garbage-collected on app launch.
+
 ---
 
 ## 4. Provider catalog (v0.6 launch)
 
-| Provider     | Capabilities                 | Free tier         | Auth            | Status   |
-|--------------|------------------------------|-------------------|-----------------|----------|
-| **Gemini**   | reimagine                    | 500 calls/day     | API key         | NEW v0.6 |
-| **Replicate**| inpaint, outpaint, reimagine | None (pay per call) | API key       | exists   |
-| **LocalFlux**| inpaint, outpaint, reimagine | Unlimited (local) | mflux install  | exists   |
+| Provider     | Capabilities                 | Cost model                                          | Auth            | Status   |
+|--------------|------------------------------|-----------------------------------------------------|-----------------|----------|
+| **Gemini**   | reimagine                    | `freeQuotaThenPaid(perDay: 500, paidEstimateUSD: 0.04)` (Nano Banana); `(perDay: 100, $0.12)` (Pro Image) | API key | NEW v0.6 |
+| **Replicate**| inpaint, outpaint, reimagine | `payPerCall($0.03)` per FLUX-Fill call (avg)        | API key         | exists   |
+| **LocalFlux**| inpaint, outpaint, reimagine | `alwaysFree`                                         | mflux install   | exists   |
 
 Other providers waiting in the wings, scoped to v0.7+:
 
@@ -194,7 +276,7 @@ headline alongside Auto-Layer and Smart Select 2.
 │                                                        │
 │  ┌──────────────────┐  Provider: [Gemini ▾]            │
 │  │                  │  Model:    [Nano Banana ▾]       │
-│  │   [snapshot of   │  Free quota today: 487/500       │
+│  │   [snapshot of   │  🟢 Free (487/500 used today)    │
 │  │   current canvas]│                                  │
 │  │                  │  Prompt:                         │
 │  │                  │  ┌────────────────────────────┐  │
@@ -203,6 +285,8 @@ headline alongside Auto-Layer and Smart Select 2.
 │                        │ shallow depth of field     │  │
 │                        └────────────────────────────┘  │
 │                                                        │
+│  Estimates based on published rates · check provider   │
+│  dashboard for actual usage                            │
 │                        [Cancel]    [Reimagine ⌘↵]      │
 └────────────────────────────────────────────────────────┘
 ```
@@ -212,10 +296,14 @@ headline alongside Auto-Layer and Smart Select 2.
 - **Provider selector** scoped to capability `.reimagine`, defaults to
   the cheapest configured provider (Gemini > LocalFlux > Replicate).
 - **Model selector** updates when provider changes.
+- **Cost line** updates when provider/model changes — color-coded per
+  the QuotaTracker spec (🟢🟡🔴💵💻❓). The single most important
+  affordance for trust: the user sees BEFORE they click Reimagine
+  whether this call is free or costs money.
 - **Prompt** is a multi-line text editor, monospace, no placeholder
   beyond a quiet hint. Cmd+Return submits.
-- **Quota indicator** when known; absent for LocalFlux (unlimited) and
-  Replicate (no per-day quota).
+- **Disclaimer** under the prompt — quiet 11pt secondary text reminding
+  the user the cost line is an estimate.
 
 **During generation:**
 
@@ -408,11 +496,12 @@ Things to decide before code:
    append-forever for v0.6 (file is tiny — ~150 bytes/line); add
    rotation only if it becomes a problem.
 
-6. **Free-quota tracking.** Gemini doesn't return remaining-quota
-   headers. Either we track locally (count calls per day, store in
-   UserDefaults) or just show "approx" + the published 500 RPD limit.
-   Recommend local tracking — simple counter, 24-hour reset by date,
-   surfaces real usage in the Reimagine sheet.
+6. ~~**Free-quota tracking.**~~ **Decided 2026-05-11.** Local tracking
+   via the new `QuotaTracker` actor + per-provider `costModel` declared
+   in the protocol. Color-coded cost line in the Reimagine sheet (🟢🟡
+   🔴💵💻❓). Disclaimer text makes clear it's an estimate, not
+   authoritative — provider dashboards remain the source of truth. See
+   §3 ("Cost-awareness via QuotaTracker").
 
 ---
 
@@ -422,16 +511,17 @@ Total: ~1 day across two coding sessions.
 
 **Phase 1 — Settings + Gemini + Reimagine** (~5 hours)
 
-1. `Tiramisu/Rendering/AIProvider.swift` — protocol + capability enum + registry stub.
-2. `Tiramisu/Rendering/GeminiProvider.swift` + `GeminiImageService.swift` — provider conformance + HTTP class.
-3. `Tiramisu/Rendering/ReplicateProvider.swift` + `LocalFluxProvider.swift` — wrap existing services with the protocol. No behavior change.
-4. `Tiramisu/Rendering/CloudAudit.swift` — single-class audit log writer.
-5. `Tiramisu/Views/AIProvidersSettings.swift` — Settings Scene pane. ProviderRow component, key fields, model dropdowns, Test buttons.
-6. Wire `Settings { ... }` Scene in `TiramisuApp.swift`.
-7. `Tiramisu/Tools/ReimagineService.swift` — orchestrator. Reads provider config, calls service, creates layer.
-8. `Tiramisu/Views/ReimagineSheet.swift` — the prompt UI.
-9. Hook to AI menu (⌘⇧R) in `AppCommands.swift`.
-10. Smoke test: paste Gemini key, drop in a photo, run Reimagine with prompt, confirm new layer.
+1. `Tiramisu/Rendering/AIProvider.swift` — protocol + `AIImageCapability` + `ProviderCostModel` enums + registry stub.
+2. `Tiramisu/Rendering/QuotaTracker.swift` — actor, per-day call counter in UserDefaults, 3-day GC.
+3. `Tiramisu/Rendering/GeminiProvider.swift` + `GeminiImageService.swift` — provider conformance + HTTP class. Records to `QuotaTracker` on success.
+4. `Tiramisu/Rendering/ReplicateProvider.swift` + `LocalFluxProvider.swift` — wrap existing services with the protocol. No behavior change.
+5. `Tiramisu/Rendering/CloudAudit.swift` — single-class audit log writer.
+6. `Tiramisu/Views/AIProvidersSettings.swift` — Settings Scene pane. ProviderRow component, key fields, model dropdowns, Test buttons.
+7. Wire `Settings { ... }` Scene in `TiramisuApp.swift`.
+8. `Tiramisu/Tools/ReimagineService.swift` — orchestrator. Reads provider config, calls service, creates layer.
+9. `Tiramisu/Views/ReimagineSheet.swift` — the prompt UI, including the color-coded cost line driven by provider.costModel + QuotaTracker.
+10. Hook to AI menu (⌘⇧R) in `AppCommands.swift`.
+11. Smoke test: paste Gemini key, drop in a photo, run Reimagine with prompt, confirm new layer + verify quota counter increments.
 
 **Phase 2 — polish + tests** (~2 hours)
 
