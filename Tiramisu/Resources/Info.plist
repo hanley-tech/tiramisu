@@ -52,7 +52,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Tiramisu never uses the camera directly.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>© 2026 Hanley Leung</string>
+	<string>© 2026 Taiso AI</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Import photos as layers to compose thumbnails.</string>
 	<key>UTExportedTypeDeclarations</key>

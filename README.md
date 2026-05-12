@@ -2,7 +2,8 @@
 
 <p align="center">
   <strong>A free, AI-native alternative to Photoshop — for macOS.</strong><br/>
-  Open source. Native to Apple Silicon. Made for creators.
+  Open source. Native to Apple Silicon. Made for creators.<br/>
+  A <a href="https://taiso.ai">Taiso AI</a> project.
 </p>
 
 <p align="center">

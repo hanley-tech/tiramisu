@@ -45,7 +45,7 @@ targets:
         CFBundleVersion: "14"
         LSMinimumSystemVersion: "26.0"
         LSApplicationCategoryType: public.app-category.graphics-design
-        NSHumanReadableCopyright: "© 2026 Hanley Leung"
+        NSHumanReadableCopyright: "© 2026 Taiso AI"
         NSCameraUsageDescription: "Tiramisu never uses the camera directly."
         NSPhotoLibraryUsageDescription: "Import photos as layers to compose thumbnails."
         NSAppTransportSecurity:

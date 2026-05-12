@@ -115,6 +115,11 @@ private struct WelcomeView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Brand.cocoa)
                         .multilineTextAlignment(.center)
+
+                    Text("from Taiso AI")
+                        .font(.system(size: 11, weight: .medium))
+                        .tracking(0.4)
+                        .foregroundStyle(Brand.cocoaSoft)
                 }
 
                 // Metaphor — the line that anchors the brand voice.
