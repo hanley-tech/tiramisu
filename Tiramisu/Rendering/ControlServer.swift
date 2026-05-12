@@ -332,7 +332,8 @@ final class ControlServer {
                                            isEraser: eraser,
                                            color: color,
                                            settings: brush,
-                                           selectionPath: store.selectionPath) else {
+                                           selectionPath: store.selectionPath,
+                                           selectionMask: store.selectionMask) else {
                 return httpResponse(status: 500, body: "PaintStroke init failed")
             }
             store.checkpoint(eraser ? "Erase" : "Paint")

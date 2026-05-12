@@ -189,12 +189,28 @@ enum SelectionTools {
     /// Positive `radius` = expand, negative = contract. Implemented via
     /// CIMorphology max/min on a rasterized mask, then re-extracted via
     /// `maskToPath`. Result is in doc top-down coords.
+    ///
+    /// Used only when the document has a path selection but no mask. When a
+    /// mask exists, callers prefer `refineEdgeMask` so soft edges survive.
     static func refineEdge(_ path: CGPath,
                            radiusPx: Double,
                            canvasSize: CGSize) -> CGPath? {
-        let w = Int(canvasSize.width), h = Int(canvasSize.height)
         guard let mask = rasterizeMask(path, canvasSize: canvasSize) else { return nil }
+        guard let processed = refineEdgeMask(mask,
+                                             radiusPx: radiusPx,
+                                             canvasSize: canvasSize) else { return nil }
+        return maskToPath(processed, canvasSize: canvasSize)
+    }
 
+    /// Expand / contract a selection mask directly. Positive radius = expand,
+    /// negative = contract, zero = identity. Preserves soft edges (the input
+    /// mask is treated as a grayscale alpha field, not a binary stencil).
+    /// Result is a canvas-resolution single-channel CGImage in doc top-down.
+    static func refineEdgeMask(_ mask: CGImage,
+                               radiusPx: Double,
+                               canvasSize: CGSize) -> CGImage? {
+        if radiusPx == 0 { return mask }
+        let w = Int(canvasSize.width), h = Int(canvasSize.height)
         let ci = CIImage(cgImage: mask)
         let r = abs(radiusPx)
         let f: CIFilter
@@ -203,19 +219,32 @@ enum SelectionTools {
             m.inputImage = ci
             m.radius = Float(r)
             f = m
-        } else if radiusPx < 0 {
+        } else {
             let m = CIFilter.morphologyMinimum()
             m.inputImage = ci
             m.radius = Float(r)
             f = m
-        } else {
-            return path
         }
         guard let out = f.outputImage else { return nil }
         let ext = CGRect(x: 0, y: 0, width: w, height: h)
-        guard let processed = LayerRenderer.ciContext.createCGImage(
-            out.cropped(to: ext), from: ext) else { return nil }
-        return maskToPath(processed, canvasSize: canvasSize)
+        return LayerRenderer.ciContext.createCGImage(out.cropped(to: ext), from: ext)
+    }
+
+    /// Gaussian-blur a selection mask by `radiusPx` doc pixels (must be > 0).
+    /// Produces a soft, alpha-graded mask. CIGaussianBlur expands the image
+    /// extent by ~radius, so we re-crop to the canvas rect to keep the
+    /// returned image dimensions stable.
+    static func featherMask(_ mask: CGImage,
+                            radiusPx: Double,
+                            canvasSize: CGSize) -> CGImage? {
+        guard radiusPx > 0 else { return mask }
+        let w = Int(canvasSize.width), h = Int(canvasSize.height)
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = CIImage(cgImage: mask)
+        blur.radius = Float(radiusPx)
+        guard let out = blur.outputImage else { return nil }
+        let ext = CGRect(x: 0, y: 0, width: w, height: h)
+        return LayerRenderer.ciContext.createCGImage(out.cropped(to: ext), from: ext)
     }
 
     // MARK: - Mask → Path

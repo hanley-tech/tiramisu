@@ -81,25 +81,59 @@ final class DocumentStore {
     /// a closed CGPath when there's an active selection; nil otherwise.
     /// Marquee writes a rect path; lasso writes a free polygon. Paint and
     /// future selection-aware features should clip against this.
+    ///
+    /// When `selectionMask` is also set, the mask is the source of truth and
+    /// this path is a hard iso-contour at ~50% alpha for marching-ants display.
     var selectionPath: CGPath?
 
-    /// Set a rectangular selection (marquee tool). Keeps `selectionPath` in
-    /// sync with a rect path so downstream consumers can rely on it.
+    /// Soft selection mask (canvas-resolution, single-channel, doc top-down).
+    /// When non-nil, this is the source of truth for alpha-aware ops:
+    /// feathered gen-fill, soft paint clipping, Refine Edge feather. Path
+    /// stays in lockstep as the hard display contour. Hard-edge tools
+    /// (marquee, lasso) leave this nil so the path alone drives them.
+    var selectionMask: CGImage?
+
+    /// Set a rectangular selection (marquee tool). Hard-edged — clears any
+    /// soft mask. Keeps `selectionPath` in sync with a rect path so
+    /// downstream consumers can rely on it.
     func setSelection(rect: CGRect) {
         selectionRect = rect
         selectionPath = CGPath(rect: rect, transform: nil)
+        selectionMask = nil
     }
 
-    /// Set a free-form selection (lasso). Updates `selectionRect` to the
-    /// path's bounding box for callers that only understand rects.
+    /// Set a free-form selection (lasso). Hard-edged — clears any soft mask.
+    /// Updates `selectionRect` to the path's bounding box for callers that
+    /// only understand rects.
     func setSelection(path: CGPath) {
         selectionPath = path
         selectionRect = path.boundingBoxOfPath
+        selectionMask = nil
+    }
+
+    /// Set a soft selection from a canvas-resolution single-channel mask
+    /// (doc top-down). Derives `selectionPath` as the hard iso-contour for
+    /// marching ants and `selectionRect` from that contour's bbox. Used by
+    /// Smart Select, Magic Wand, Refine-Edge feather, and any AI tool whose
+    /// natural output is a probability/alpha mask.
+    func setSelection(mask: CGImage) {
+        selectionMask = mask
+        if let p = SelectionTools.maskToPath(mask, canvasSize: canvasSize) {
+            selectionPath = p
+            selectionRect = p.boundingBoxOfPath
+        } else {
+            // Empty / all-black mask — treat as no selection. Keeps the
+            // invariant that selectionPath is nil iff there's nothing selected.
+            selectionPath = nil
+            selectionRect = nil
+            selectionMask = nil
+        }
     }
 
     func clearSelection() {
         selectionRect = nil
         selectionPath = nil
+        selectionMask = nil
     }
     /// Generative-fill progress message — non-nil while a fill is in flight.
     var generativeProgress: String?

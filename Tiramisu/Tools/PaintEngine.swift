@@ -34,6 +34,11 @@ final class PaintStroke {
     /// stop tracking entirely.
     private let smoothing: CGFloat
     private let clipPath: CGPath?
+    /// Bottom-up, DeviceGray (no-alpha) version of the document's soft
+    /// selection mask, ready for `CGContext.clip(to:mask:)` at commit. nil
+    /// when the document either has no selection or only a hard-path
+    /// selection (in which case `clipPath` does the clipping per stamp).
+    private let softMask: CGImage?
 
     private var lastDocPoint: CGPoint?       // last *smoothed* point we stamped from
     private var smoothed: CGPoint?           // running smoothed position
@@ -45,7 +50,8 @@ final class PaintStroke {
           isEraser: Bool,
           color: ColorRGB,
           settings: BrushSettings,
-          selectionPath: CGPath?) {
+          selectionPath: CGPath?,
+          selectionMask: CGImage? = nil) {
         guard layer.kind == .raster else { return nil }
 
         let w = Int(canvasSize.width), h = Int(canvasSize.height)
@@ -73,16 +79,44 @@ final class PaintStroke {
         self.flow = max(0.01, min(1, CGFloat(settings.flow)))
         self.smoothing = max(0, min(0.97, CGFloat(settings.smoothing)))
 
-        if let path = selectionPath {
+        // Soft mask wins when present — stamps run unclipped and the mask
+        // is alpha-multiplied at commit, so soft selection edges feather
+        // the stroke instead of slicing it off at a hard contour.
+        if let mask = selectionMask {
+            self.softMask = Self.prepareSoftMask(mask, canvasSize: canvasSize)
+            self.clipPath = nil
+        } else if let path = selectionPath {
             // Selection lives in doc top-down coords; CGContext is bottom-up.
             // Mirror the path's Y axis around canvasH/2 so it lands in the
             // same visual position when drawn into the bottom-up context.
             var t = CGAffineTransform(scaleX: 1, y: -1)
                 .concatenating(CGAffineTransform(translationX: 0, y: canvasSize.height))
             self.clipPath = path.copy(using: &t) ?? path
+            self.softMask = nil
         } else {
             self.clipPath = nil
+            self.softMask = nil
         }
+    }
+
+    /// Convert the document's soft selection mask (doc top-down, arbitrary
+    /// colorspace from CIImage round-tripping) into the form
+    /// `CGContext.clip(to:mask:)` requires: DeviceGray, no alpha component,
+    /// Y-flipped so it lines up with the bottom-up stroke context.
+    private static func prepareSoftMask(_ mask: CGImage, canvasSize: CGSize) -> CGImage? {
+        let w = Int(canvasSize.width), h = Int(canvasSize.height)
+        guard w > 0, h > 0 else { return nil }
+        let cs = CGColorSpaceCreateDeviceGray()
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.none.rawValue) else {
+            return nil
+        }
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(mask, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
     }
 
     /// Add a pointer sample (doc top-down coords). Drops one stamp on the
@@ -168,6 +202,13 @@ final class PaintStroke {
         }
         if let strokeImg = strokeCtx.makeImage() {
             outCtx.saveGState()
+            // Soft selection mask: applied as a clip on the stroke (not the
+            // base) so the underlying pixels outside the selection are
+            // preserved exactly. For the eraser path this means we only
+            // subtract alpha where the soft mask says we may.
+            if let mask = softMask {
+                outCtx.clip(to: rect, mask: mask)
+            }
             outCtx.setAlpha(opacity)
             outCtx.setBlendMode(isEraser ? .destinationOut : .normal)
             outCtx.draw(strokeImg, in: rect)

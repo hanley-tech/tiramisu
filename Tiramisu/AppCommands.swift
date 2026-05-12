@@ -62,6 +62,10 @@ struct AppCommands: Commands {
                 Button("Contract 1 px")  { refineSelection(by: -1) }
                 Button("Contract 5 px")  { refineSelection(by: -5) }
                 Button("Contract 10 px") { refineSelection(by: -10) }
+                Divider()
+                Button("Feather 1 px")  { featherSelection(by: 1) }
+                Button("Feather 5 px")  { featherSelection(by: 5) }
+                Button("Feather 10 px") { featherSelection(by: 10) }
             }
             .disabled(store.selectionPath == nil)
         }
@@ -106,10 +110,23 @@ struct AppCommands: Commands {
     }
 
     /// Refine Edge — expand or contract the active selection by `radius`
-    /// doc pixels via CIMorphology + contour re-extraction. No-op when
-    /// there's no selection (the menu items are already disabled in that
-    /// state, but defensive guard anyway).
+    /// doc pixels via CIMorphology. When the selection has a soft mask we
+    /// operate on it directly so the soft edges survive; for hard path-only
+    /// selections we fall back to the path → mask → path round-trip.
     private func refineSelection(by radius: Double) {
+        let label = radius >= 0 ? "Expand Selection" : "Contract Selection"
+        if let mask = store.selectionMask {
+            guard let next = SelectionTools.refineEdgeMask(mask,
+                                                           radiusPx: radius,
+                                                           canvasSize: store.canvasSize) else {
+                tlog("refineEdgeMask: returned nil for radius=\(radius)")
+                return
+            }
+            store.checkpoint(label)
+            store.setSelection(mask: next)
+            store.invalidate()
+            return
+        }
         guard let path = store.selectionPath else { return }
         guard let next = SelectionTools.refineEdge(path,
                                                     radiusPx: radius,
@@ -117,8 +134,33 @@ struct AppCommands: Commands {
             tlog("refineEdge: returned nil for radius=\(radius)")
             return
         }
-        store.checkpoint(radius >= 0 ? "Expand Selection" : "Contract Selection")
+        store.checkpoint(label)
         store.setSelection(path: next)
+        store.invalidate()
+    }
+
+    /// Feather the active selection by `radius` doc pixels (Gaussian blur on
+    /// the selection mask). Always promotes the selection to a soft mask:
+    /// if the document only has a path, we rasterize it first, then blur.
+    private func featherSelection(by radius: Double) {
+        guard radius > 0 else { return }
+        let baseMask: CGImage?
+        if let m = store.selectionMask {
+            baseMask = m
+        } else if let p = store.selectionPath {
+            baseMask = SelectionTools.rasterizeMask(p, canvasSize: store.canvasSize)
+        } else {
+            return
+        }
+        guard let base = baseMask,
+              let feathered = SelectionTools.featherMask(base,
+                                                         radiusPx: radius,
+                                                         canvasSize: store.canvasSize) else {
+            tlog("featherMask: returned nil for radius=\(radius)")
+            return
+        }
+        store.checkpoint("Feather Selection")
+        store.setSelection(mask: feathered)
         store.invalidate()
     }
 

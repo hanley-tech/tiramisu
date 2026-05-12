@@ -135,6 +135,77 @@ struct SelectionToolsTests {
         #expect(abs(cb.maxX - 150) < 6, "round-trip maxX drifted: \(cb.maxX) vs 150")
     }
 
+    /// featherMask should produce a monotonic alpha falloff at the edge of a
+    /// hard rect: inside should stay opaque, outside should ramp to zero, and
+    /// the falloff width should be on the order of the requested radius.
+    @Test("featherMask produces a monotonic alpha falloff at the rect edge")
+    func featherMaskFalloff() {
+        let canvas = CGSize(width: 200, height: 200)
+        // Hard rect centered at x=100; right edge at x=140.
+        let rect = CGPath(rect: CGRect(x: 60, y: 60, width: 80, height: 80), transform: nil)
+        guard let hard = SelectionTools.rasterizeMask(rect, canvasSize: canvas) else {
+            Issue.record("rasterizeMask failed"); return
+        }
+        let radius = 8.0
+        guard let soft = SelectionTools.featherMask(hard, radiusPx: radius, canvasSize: canvas) else {
+            Issue.record("featherMask failed"); return
+        }
+
+        // Deep interior should still be fully opaque (well inside the rect,
+        // far from the blurred edge).
+        let inside = maskValue(soft, x: 100, y: 100)
+        #expect(inside > 240, "rect interior should remain near-opaque (got \(inside))")
+
+        // Far outside should be zero.
+        let outside = maskValue(soft, x: 180, y: 100)
+        #expect(outside < 5, "well-outside should be zero alpha (got \(outside))")
+
+        // Within the falloff band there must be a pixel in the soft-gray
+        // range, not just hard 0/255 cliff. The exact 50% crossover depends
+        // on CIGaussianBlur's discrete kernel, so we scan the band.
+        var softSample: Int = -1
+        for x in 136...148 {
+            let v = maskValue(soft, x: x, y: 100)
+            if v > 40 && v < 215 { softSample = v; break }
+        }
+        #expect(softSample >= 0, "feathered edge should have at least one mid-alpha pixel (none found in [136,148])")
+
+        // Monotonic ramp: sampling outward from inside to outside across the
+        // feathered edge should never go up.
+        var prev = 256
+        for x in stride(from: 132, through: 152, by: 2) {
+            let v = maskValue(soft, x: x, y: 100)
+            #expect(v <= prev + 2, "feather falloff not monotonic at x=\(x): \(v) > \(prev)")
+            prev = v
+        }
+    }
+
+    /// refineEdgeMask preserves soft edges. Feathered input + small contract
+    /// should still have a soft boundary, not a hard cliff. This is the
+    /// regression test for routing Refine Edge through the mask directly
+    /// instead of the lossy path round-trip.
+    @Test("refineEdgeMask preserves soft edges across contract")
+    func refineEdgeMaskPreservesSoftness() {
+        let canvas = CGSize(width: 200, height: 200)
+        let rect = CGPath(rect: CGRect(x: 60, y: 60, width: 80, height: 80), transform: nil)
+        guard let hard = SelectionTools.rasterizeMask(rect, canvasSize: canvas),
+              let soft = SelectionTools.featherMask(hard, radiusPx: 6, canvasSize: canvas) else {
+            Issue.record("setup failed"); return
+        }
+        guard let contracted = SelectionTools.refineEdgeMask(soft, radiusPx: -3, canvasSize: canvas) else {
+            Issue.record("refineEdgeMask failed"); return
+        }
+        // After contracting by 3, the edge has moved inward but should still
+        // be soft — i.e. there's still a mid-gray band somewhere across the
+        // edge, not just black-to-white.
+        var foundMid = false
+        for x in 125...145 {
+            let v = maskValue(contracted, x: x, y: 100)
+            if v > 60 && v < 200 { foundMid = true; break }
+        }
+        #expect(foundMid, "contracted soft mask should still have a soft edge band")
+    }
+
     // MARK: - helpers
 
     /// Two-color image: top half = `top`, bottom half = `bottom`.

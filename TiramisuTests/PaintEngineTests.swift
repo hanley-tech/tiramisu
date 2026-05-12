@@ -179,6 +179,62 @@ struct PaintEngineTests {
                 "pixel inside bbox but outside diamond shape must be transparent, a=\(oa)")
     }
 
+    /// A soft selection mask should feather the stroke at the boundary: the
+    /// deep interior of the selection paints fully opaque, well outside is
+    /// untouched, and the boundary itself shows intermediate alpha. This is
+    /// the regression test for routing PaintStroke through
+    /// `selectionMask` (alpha-multiply at commit) instead of the hard
+    /// path-clip per stamp.
+    @Test("soft selection mask feathers paint at the boundary")
+    func softMaskFeatherClipsPaint() {
+        let canvas = CGSize(width: 200, height: 200)
+        let layer = PXLayer(name: "Paint", kind: .raster)
+        var brush = BrushSettings()
+        brush.size = 100         // big enough to cross the soft mask boundary
+        brush.feather = 0        // hard brush — softness must come from selection
+        brush.opacity = 1
+        brush.flow = 1
+
+        // Build a soft selection: hard rect (60..140, 60..140) feathered by 8 px.
+        let rect = CGPath(rect: CGRect(x: 60, y: 60, width: 80, height: 80), transform: nil)
+        guard let hard = SelectionTools.rasterizeMask(rect, canvasSize: canvas),
+              let soft = SelectionTools.featherMask(hard, radiusPx: 8, canvasSize: canvas) else {
+            Issue.record("feather mask setup failed"); return
+        }
+
+        let stroke = PaintStroke(layer: layer,
+                                 canvasSize: canvas,
+                                 isEraser: false,
+                                 color: ColorRGB(r: 1, g: 0, b: 0),
+                                 settings: brush,
+                                 selectionPath: nil,
+                                 selectionMask: soft)
+        stroke?.addPoint(CGPoint(x: 100, y: 100))
+        stroke?.commitToLayer()
+
+        guard let img = layer.raster else {
+            Issue.record("layer.raster missing after stroke"); return
+        }
+
+        // Deep interior of the selection: paint should be fully opaque.
+        let (_, _, _, inA) = pixel(img, x: 100, y: 100)
+        #expect(inA > 0.95, "deep interior must be fully painted, a=\(inA)")
+
+        // Well outside the soft mask: nothing should be painted.
+        let (_, _, _, outA) = pixel(img, x: 180, y: 100)
+        #expect(outA < 0.05, "well-outside must remain transparent, a=\(outA)")
+
+        // Across the soft boundary there must be at least one pixel with
+        // intermediate alpha — that's the feathered edge. (Hard clipping
+        // would produce only 0 or full-paint alphas in this band.)
+        var foundEdge = false
+        for x in 136...148 {
+            let (_, _, _, a) = pixel(img, x: x, y: 100)
+            if a > 0.15 && a < 0.85 { foundEdge = true; break }
+        }
+        #expect(foundEdge, "soft mask boundary must produce at least one mid-alpha pixel between x=136 and x=148")
+    }
+
     // MARK: - helpers
 
     /// Read an sRGB premultiplied-alpha pixel as 4 normalized doubles.

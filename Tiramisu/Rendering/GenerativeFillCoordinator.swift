@@ -53,7 +53,14 @@ enum GenerativeFillCoordinator {
                 throw GenerativeFillError.predictionFailed("Could not composite document")
             }
             context = composed
-            mask = buildCanvasMask(canvas: canvas, selectionDoc: store.selectionRect)
+            // Soft selection mask wins over the bbox rect — gives the model
+            // feathered fill edges that smoothly blend with the surrounding
+            // pixels instead of cutting hard at a rectangle.
+            if let soft = store.selectionMask {
+                mask = buildCanvasMask(canvas: canvas, selectionMask: soft)
+            } else {
+                mask = buildCanvasMask(canvas: canvas, selectionDoc: store.selectionRect)
+            }
         }
 
         tlog("Generative Fill: starting (mode=\(mode), canvas=\(Int(canvas.width))x\(Int(canvas.height)), selection=\(store.selectionRect.map { "\(Int($0.width))x\(Int($0.height))@(\(Int($0.minX)),\(Int($0.minY)))" } ?? "none"))")
@@ -129,6 +136,27 @@ enum GenerativeFillCoordinator {
         store.activeLayerID = new.id
         store.invalidate()
         tlog("Generative Fill → new layer '\(new.name)' (\(fillOnly.width)x\(fillOnly.height), \(png.count) bytes)")
+    }
+
+    /// Build a canvas mask from a soft (alpha-graded) selection mask.
+    /// Black background + the mask drawn on top, in the same RGBA8 sRGB
+    /// format as the bbox-rect path. CGImage memory rows are doc top-down
+    /// in both cases, so byte layout matches what every backend already
+    /// expects from `buildCanvasMask(canvas:selectionDoc:)`.
+    private static func buildCanvasMask(canvas: CGSize, selectionMask: CGImage) -> CGImage {
+        let w = Int(canvas.width), h = Int(canvas.height)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let ctx = CGContext(data: nil, width: w, height: h,
+                            bitsPerComponent: 8, bytesPerRow: 0,
+                            space: space,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(NSColor.black.cgColor)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        // No Y-flip needed: ctx.draw preserves the image's row order, and the
+        // soft mask is already in doc top-down memory layout from the
+        // SelectionTools pipeline (rasterizeMask / featherMask / refineEdgeMask).
+        ctx.draw(selectionMask, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()!
     }
 
     private static func buildCanvasMask(canvas: CGSize, selectionDoc: CGRect?) -> CGImage {

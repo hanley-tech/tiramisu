@@ -563,7 +563,8 @@ struct TransformOverlay: View {
                 isEraser: eraser,
                 color: store.foreground,
                 settings: store.brush,
-                selectionPath: store.selectionPath
+                selectionPath: store.selectionPath,
+                selectionMask: store.selectionMask
             )
         }
         guard let stroke = paintStroke else { return }
@@ -587,12 +588,11 @@ struct TransformOverlay: View {
             tlog("magicWand: floodFill returned nil")
             return
         }
-        guard let path = SelectionTools.maskToPath(mask, canvasSize: store.canvasSize) else {
-            tlog("magicWand: maskToPath returned nil")
-            return
-        }
         store.checkpoint("Magic Wand")
-        store.setSelection(path: path)
+        // Magic Wand's flood-fill is binary, but we still route through
+        // setSelection(mask:) so a subsequent Refine Edge → Feather can
+        // operate on the mask directly instead of re-rasterizing the path.
+        store.setSelection(mask: mask)
         store.invalidate()
     }
 
@@ -612,12 +612,12 @@ struct TransformOverlay: View {
             tlog("smartSelect: no mask produced")
             return
         }
-        guard let path = SelectionTools.maskToPath(mask, canvasSize: store.canvasSize) else {
-            tlog("smartSelect: maskToPath returned nil")
-            return
-        }
         store.checkpoint("Smart Select")
-        store.setSelection(path: path)
+        // Vision foreground-instance masks have soft edges; route through
+        // setSelection(mask:) so we keep that softness for downstream paint
+        // clipping, feathered Refine Edge, and gen-fill rather than
+        // collapsing it to a hard contour here.
+        store.setSelection(mask: mask)
         store.invalidate()
     }
 
