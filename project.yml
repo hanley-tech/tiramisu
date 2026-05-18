@@ -41,8 +41,8 @@ targets:
       properties:
         CFBundleName: Tiramisu
         CFBundleDisplayName: Tiramisu
-        CFBundleShortVersionString: "0.6.1"
-        CFBundleVersion: "14"
+        CFBundleShortVersionString: "0.7.0"
+        CFBundleVersion: "15"
         LSMinimumSystemVersion: "26.0"
         LSApplicationCategoryType: public.app-category.graphics-design
         NSHumanReadableCopyright: "© 2026 Taiso AI"
