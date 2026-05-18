@@ -79,6 +79,12 @@ struct GuidesOverlay: View {
             if store.showYTBannerSafeAreas {
                 drawBannerSafeAreas(ctx: ctx, size: size)
             }
+            if store.showLinkedInProfileSafeAreas {
+                drawLinkedInProfileSafeAreas(ctx: ctx, size: size)
+            }
+            if store.showLinkedInCompanySafeAreas {
+                drawLinkedInCompanySafeAreas(ctx: ctx, size: size)
+            }
             if store.showPFPCircleMask {
                 drawPFPCircle(ctx: ctx, size: size)
             }
@@ -154,6 +160,109 @@ struct GuidesOverlay: View {
         zone(width: tabletW,  color: .green.opacity(0.7), label: "Tablet 1855×423")
         // Mobile (the safest zone — emphasize)
         zone(width: mobileW,  color: .orange,            label: "Mobile-safe 1546×423 — keep logos & text here")
+    }
+
+    /// LinkedIn personal profile banner safe areas. Canvas is 1584×396
+    /// (4:1). Geometry is proportional so it holds at any resolution of
+    /// the same aspect. Values are LinkedIn's published + community-
+    /// consensus numbers as of 2026-05; LinkedIn adjusts these (the mobile
+    /// avatar overlap changed Jan 2025), so the overlay is labeled approx
+    /// and the green safe zone is biased conservative.
+    private func drawLinkedInProfileSafeAreas(ctx: GraphicsContext, size: CGSize) {
+        let w = size.width, h = size.height
+        let fs = max(9, h * 0.045)
+
+        // Full banner.
+        ctx.stroke(Path(CGRect(x: 0, y: 0, width: w, height: h)),
+                   with: .color(.purple.opacity(0.6)),
+                   style: StrokeStyle(lineWidth: 1.5))
+        ctx.draw(Text("LinkedIn Profile 1584×396 — approx, LinkedIn adjusts")
+                    .font(.system(size: fs, weight: .semibold))
+                    .foregroundStyle(.purple.opacity(0.85)),
+                 at: CGPoint(x: 8, y: 8), anchor: .topLeading)
+
+        // Desktop-visible: full width, ~79% height (top/bottom trimmed).
+        let deskH = h * (312.0 / 396.0)
+        ctx.stroke(Path(CGRect(x: 0, y: (h - deskH) / 2, width: w, height: deskH)),
+                   with: .color(.blue.opacity(0.7)),
+                   style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+
+        // Mobile-visible: ~92% width centered, full height.
+        let mobW = w * (1456.0 / 1584.0)
+        ctx.stroke(Path(CGRect(x: (w - mobW) / 2, y: 0, width: mobW, height: h)),
+                   with: .color(.orange),
+                   style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+
+        // Avatar punch — desktop (~200px circle, bottom-left, dips slightly
+        // below the banner edge).
+        let dDia = w * (200.0 / 1584.0)
+        let dx = w * (60.0 / 1584.0)
+        let dRect = CGRect(x: dx, y: h - dDia * 0.82, width: dDia, height: dDia)
+        ctx.fill(Path(ellipseIn: dRect), with: .color(.red.opacity(0.16)))
+        ctx.stroke(Path(ellipseIn: dRect), with: .color(.red.opacity(0.75)),
+                   style: StrokeStyle(lineWidth: 1.5))
+
+        // Avatar punch — mobile (~568×264, larger + lower, left-aligned).
+        let mW = w * (568.0 / 1584.0)
+        let mH = h * (264.0 / 396.0)
+        ctx.stroke(Path(roundedRect: CGRect(x: w * (40.0 / 1584.0), y: h - mH,
+                                            width: mW, height: mH),
+                                     cornerRadius: mH * 0.18),
+                   with: .color(.red.opacity(0.45)),
+                   style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+        // Conservative text/logo safe zone — centered, upper-center.
+        let szW = w * (1100.0 / 1584.0)
+        let szH = h * (260.0 / 396.0)
+        let szRect = CGRect(x: (w - szW) / 2, y: h * (40.0 / 396.0),
+                            width: szW, height: szH)
+        ctx.stroke(Path(szRect), with: .color(.green.opacity(0.85)),
+                   style: StrokeStyle(lineWidth: 1.5))
+        ctx.draw(Text("Safe zone — keep text & logos here")
+                    .font(.system(size: fs, weight: .medium))
+                    .foregroundStyle(.green.opacity(0.9)),
+                 at: CGPoint(x: szRect.midX, y: szRect.minY + 5), anchor: .top)
+    }
+
+    /// LinkedIn company page cover. Renders ~1128×191. The company logo
+    /// sits lower-left as a separate rounded UI tile (not a circular punch
+    /// like personal profiles). Safe zone is the upper-center band.
+    private func drawLinkedInCompanySafeAreas(ctx: GraphicsContext, size: CGSize) {
+        let w = size.width, h = size.height
+        let fs = max(9, h * 0.085)
+
+        ctx.stroke(Path(CGRect(x: 0, y: 0, width: w, height: h)),
+                   with: .color(.purple.opacity(0.6)),
+                   style: StrokeStyle(lineWidth: 1.5))
+        ctx.draw(Text("LinkedIn Company 1128×191 — approx")
+                    .font(.system(size: fs, weight: .semibold))
+                    .foregroundStyle(.purple.opacity(0.85)),
+                 at: CGPoint(x: 8, y: 6), anchor: .topLeading)
+
+        // Logo tile marker — lower-left.
+        let logo = w * (120.0 / 1128.0)
+        let lRect = CGRect(x: w * (40.0 / 1128.0),
+                           y: h - logo - h * (16.0 / 191.0),
+                           width: logo, height: logo)
+        ctx.stroke(Path(roundedRect: lRect, cornerRadius: logo * 0.15),
+                   with: .color(.red.opacity(0.7)),
+                   style: StrokeStyle(lineWidth: 1.5))
+        ctx.draw(Text("Logo")
+                    .font(.system(size: max(8, h * 0.065), weight: .medium))
+                    .foregroundStyle(.red.opacity(0.85)),
+                 at: CGPoint(x: lRect.midX, y: lRect.midY), anchor: .center)
+
+        // Safe zone — upper-center band.
+        let szW = w * 0.6
+        let szH = h * 0.6
+        let szRect = CGRect(x: (w - szW) / 2, y: h * 0.10,
+                            width: szW, height: szH)
+        ctx.stroke(Path(szRect), with: .color(.green.opacity(0.85)),
+                   style: StrokeStyle(lineWidth: 1.5))
+        ctx.draw(Text("Safe zone")
+                    .font(.system(size: fs, weight: .medium))
+                    .foregroundStyle(.green.opacity(0.9)),
+                 at: CGPoint(x: szRect.midX, y: szRect.minY + 4), anchor: .top)
     }
 
     /// Profile-picture circle mask. Most platforms (YouTube, Twitter/X, Discord,

@@ -62,11 +62,11 @@ private struct CanvasToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Menu {
-                Section("Thumbnails") {
-                    Button("YouTube · 1280 × 720") { setSize(1280, 720) }
-                    Button("FHD · 1920 × 1080") { setSize(1920, 1080) }
+                Section("YouTube Thumbnail (16:9)") {
+                    Button("4K · 3840 × 2160 — recommended") { setSize(3840, 2160) }
                     Button("2K · 2560 × 1440") { setSize(2560, 1440) }
-                    Button("4K UHD · 3840 × 2160") { setSize(3840, 2160) }
+                    Button("1080p · 1920 × 1080") { setSize(1920, 1080) }
+                    Button("720p · 1280 × 720") { setSize(1280, 720) }
                 }
                 Section("Instagram") {
                     Button("Square · 1080 × 1080") { setSize(1080, 1080) }
@@ -82,7 +82,8 @@ private struct CanvasToolbar: ToolbarContent {
                 }
                 Section("LinkedIn") {
                     Button("Post · 1200 × 627") { setSize(1200, 627) }
-                    Button("Header · 1584 × 396") { setSize(1584, 396) }
+                    Button("Profile Banner · 1584 × 396") { setSize(1584, 396) }
+                    Button("Company Cover · 1128 × 191") { setSize(1128, 191) }
                 }
                 Section("Channel Art / Banners") {
                     Button("YouTube Banner · 2560 × 1440") { setSize(2560, 1440) }
@@ -114,6 +115,9 @@ private struct CanvasToolbar: ToolbarContent {
                 Toggle("YouTube Duration Pill", isOn: $store.showYTDurationPill)
                 Divider()
                 Toggle("YouTube Banner Safe Areas", isOn: $store.showYTBannerSafeAreas)
+                Divider()
+                Toggle("LinkedIn Profile Safe Areas", isOn: $store.showLinkedInProfileSafeAreas)
+                Toggle("LinkedIn Company Safe Areas", isOn: $store.showLinkedInCompanySafeAreas)
                 Divider()
                 Toggle("PFP Circle Mask", isOn: $store.showPFPCircleMask)
             } label: {

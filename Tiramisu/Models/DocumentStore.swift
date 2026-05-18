@@ -51,6 +51,8 @@ final class DocumentStore {
     var showYTCornerRadius: Bool = false
     var showYTDurationPill: Bool = false
     var showYTBannerSafeAreas: Bool = false
+    var showLinkedInProfileSafeAreas: Bool = false
+    var showLinkedInCompanySafeAreas: Bool = false
     var showPFPCircleMask: Bool = false
     var undoStack: [DocumentSnapshot] = []
     var redoStack: [DocumentSnapshot] = []
