@@ -28,15 +28,10 @@ enum GenerativeFillCoordinator {
         let context: CGImage
         let mask: CGImage
         if mode == .expand {
-            // Default: pre-fill the empty bands with stretched edge texture
-            // so the model has strong priors to "continue" rather than
-            // freedom to invent. Even mask-aware backends (FLUX-Fill,
-            // Replicate flux-fill-dev) hallucinate subjects — including
-            // faces — when the bands arrive transparent and the prompt is
-            // generic. A service can opt back into bare-context by
-            // overriding needsPrepFill = false, but the protocol default is
-            // true now. preferredInputSize != nil forces prep-fill too
-            // (the tiled SD path needs real content in each tile).
+            // FLUX-Fill and Replicate are mask-aware — they figure out band
+            // content from the mask alone, no prep fill required. Backends
+            // that need real image content in all pixels (e.g. OpenAI
+            // images/edits) set needsPrepFill = true to get pre-stretched edges.
             let needsPrepFill = service.preferredInputSize != nil || service.needsPrepFill
             if needsPrepFill {
                 let prepared = try buildExpandInput(store: store, layer: activeLayer)
@@ -607,7 +602,7 @@ enum GenerativeFillCoordinator {
     /// mask that's white in those empty regions (with feather into the layer).
     private static func buildExpandInput(store: DocumentStore, layer: PXLayer) throws -> ExpandInput {
         guard let smart = layer.smart else {
-            throw GenerativeFillError.predictionFailed("Expand needs a Smart Object. The active layer '\(layer.name)' was added as a baked raster (probably via an old Place Image…). Re-add the image with File → Place Image… (now creates Smart Objects), Paste Image as New Layer (⌘⇧V), or drag-drop from Finder, and try again.")
+            throw GenerativeFillError.predictionFailed("Expand needs a Smart Object. The active layer '\(layer.name)' was added as a baked raster (probably via an old Place Image…). Re-add the image with File → Place Image… (now creates Smart Objects), Paste Image as New Layer (⌘V), or drag-drop from Finder, and try again.")
         }
         guard let source = SmartObjectEngine.loadSource(smart) else {
             throw GenerativeFillError.predictionFailed("Could not decode smart layer source bytes — file may be missing or corrupt.")

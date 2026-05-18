@@ -175,12 +175,15 @@ enum GenerativeFillUI {
         case .remove:
             if prompt.isEmpty { prompt = "natural background continuation, seamless, no objects, photorealistic" }
         case .expand:
-            // Anti-subject language up front. Without it, FLUX-Fill (and
-            // Replicate flux-fill-dev) happily invents people, faces, and
-            // objects in the empty bands even when given edge-padded
-            // priors. The "background only" + "empty space" phrasing
-            // consistently keeps the model focused on continuing texture.
-            if prompt.isEmpty { prompt = "seamless continuation of the existing photo, matching texture, color and lighting, photorealistic background only, empty space, no people, no faces, no figures, no subjects, no objects" }
+            // Pass an empty prompt straight through. Matches the recipe
+            // documented in LocalFluxFillService.swift:139 (the
+            // multimodalart/flux-fill-outpaint HF Space convention).
+            // Descriptive prompts cue FLUX-Fill to *generate content*
+            // (figures, faces, gray photorealistic gradients on graphic
+            // art) instead of cleanly extending the surrounding texture.
+            // If the user typed their own prompt, it stays — they're
+            // intentionally telling the model what to put there.
+            break
         default: break
         }
 
